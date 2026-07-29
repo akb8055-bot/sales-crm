@@ -6,6 +6,7 @@ from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
+import altair as alt
 import pandas as pd
 import streamlit as st
 
@@ -219,6 +220,105 @@ def style_app() -> None:
                 color: var(--muted);
                 font-size: 0.82rem;
                 margin-top: 4px;
+            }
+
+            .chart-shell {
+                background: linear-gradient(180deg, rgba(255,255,255,0.92), rgba(245,250,249,0.88));
+                border: 1px solid rgba(14, 27, 39, 0.10);
+                border-radius: 22px;
+                padding: 18px 18px 10px;
+                box-shadow:
+                    0 18px 36px rgba(9, 27, 38, 0.10),
+                    0 0 0 1px rgba(255,255,255,0.45) inset,
+                    0 0 28px rgba(14, 165, 164, 0.10);
+            }
+
+            .chart-shell::before {
+                content: '';
+                display: block;
+                height: 4px;
+                border-radius: 999px;
+                margin: -6px 0 14px;
+                background: linear-gradient(90deg, #0ea5a4 0%, #38bdf8 45%, #f97316 100%);
+                box-shadow: 0 0 18px rgba(14, 165, 164, 0.45);
+            }
+
+            .report-hero {
+                background: linear-gradient(135deg, rgba(8, 47, 73, 0.96), rgba(15, 118, 110, 0.92));
+                color: #effdf9;
+                border-radius: 22px;
+                padding: 18px 20px;
+                border: 1px solid rgba(255,255,255,0.14);
+                box-shadow: 0 18px 36px rgba(10, 24, 38, 0.18);
+                margin-bottom: 14px;
+            }
+
+            .report-hero h3 {
+                margin: 0;
+                font-size: 1.3rem;
+            }
+
+            .report-hero p {
+                margin: 6px 0 0;
+                color: #d6fbf7;
+                line-height: 1.5;
+            }
+
+            .report-grid {
+                display: grid;
+                grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+                gap: 12px;
+                margin: 12px 0 16px;
+            }
+
+            .report-card {
+                background: rgba(255,255,255,0.9);
+                border: 1px solid rgba(15, 30, 42, 0.08);
+                border-radius: 18px;
+                padding: 16px 18px;
+                box-shadow: 0 12px 24px rgba(15, 31, 45, 0.08);
+            }
+
+            .report-card .kpi-label {
+                color: var(--muted);
+                font-size: 0.76rem;
+                text-transform: uppercase;
+                letter-spacing: 0.12em;
+                margin-bottom: 8px;
+            }
+
+            .report-card .kpi-value {
+                font-size: 1.45rem;
+                font-weight: 700;
+                margin-bottom: 6px;
+            }
+
+            .report-card .kpi-note {
+                color: var(--muted);
+                font-size: 0.9rem;
+                line-height: 1.45;
+            }
+
+            .report-section {
+                background: rgba(255,255,255,0.88);
+                border: 1px solid rgba(15, 30, 42, 0.08);
+                border-radius: 20px;
+                padding: 18px;
+                box-shadow: 0 12px 24px rgba(15, 31, 45, 0.06);
+                margin-bottom: 14px;
+            }
+
+            .report-section h4 {
+                margin-top: 0;
+            }
+
+            .report-note {
+                background: linear-gradient(90deg, rgba(14,165,164,0.10), rgba(249,115,22,0.08));
+                border-left: 4px solid var(--accent);
+                border-radius: 12px;
+                padding: 12px 14px;
+                color: var(--ink);
+                margin: 12px 0 0;
             }
 
             .metric-card {
@@ -627,11 +727,36 @@ def dashboard(data: dict[str, list[dict[str, Any]]]) -> None:
     with left:
         st.markdown("<div class='section-card'>", unsafe_allow_html=True)
         st.subheader("Pipeline by Status")
-        st.bar_chart(top_status_df)
+        chart_df = pd.DataFrame({"status": top_status_df.index, "count": top_status_df.values})
+        chart_max = max(int(top_status_df.max()) if len(top_status_df) else 0, 1)
+        chart = (
+            alt.Chart(chart_df)
+            .mark_bar(cornerRadiusTopLeft=10, cornerRadiusTopRight=10, size=36)
+            .encode(
+                x=alt.X("status:N", sort=STATUSES, title=None, axis=alt.Axis(labelAngle=0, labelFontSize=11)),
+                y=alt.Y("count:Q", title=None, scale=alt.Scale(domain=[0, chart_max])),
+                color=alt.Color(
+                    "status:N",
+                    sort=STATUSES,
+                    scale=alt.Scale(range=["#0ea5a4", "#38bdf8", "#22c55e", "#f97316", "#eab308", "#14b8a6", "#64748b"]),
+                    legend=None,
+                ),
+                tooltip=[alt.Tooltip("status:N", title="Status"), alt.Tooltip("count:Q", title="Leads")],
+            )
+            .properties(height=240)
+        )
+        text = (
+            alt.Chart(chart_df)
+            .mark_text(dy=-10, fontSize=12, fontWeight=700, color="#13202a")
+            .encode(x="status:N", y="count:Q", text="count:Q")
+        )
+        st.markdown("<div class='chart-shell'>", unsafe_allow_html=True)
+        st.altair_chart(chart + text, use_container_width=True)
         st.markdown("<div class='status-strip'>" + "".join(
             f"<div class='status-pill'><span class='label'>{status}</span><span class='value'>{int(top_status_df.get(status, 0))}</span></div>"
             for status in STATUSES
         ) + "</div>", unsafe_allow_html=True)
+        st.markdown("</div>", unsafe_allow_html=True)
         st.markdown("</div>", unsafe_allow_html=True)
 
     with right:
@@ -1170,15 +1295,70 @@ def render_period_report(data: dict[str, Any], start: date, end: date, label: st
     proposal_total = sum(float(x.get("quote_value", 0) or 0) for x in proposals)
     won_total = sum(float(x.get("quotation_value", 0) or 0) for x in won_rows)
 
-    m1, m2, m3, m4 = st.columns(4)
-    m1.metric(f"Leads Connected ({label})", len(connected))
-    m2.metric(f"Proposals Shared ({label})", len(proposals))
-    m3.metric(
-        f"Proposal Value ({label})",
-        f"AED {proposal_total:,.0f}",
+    report_trend = pd.DataFrame(
+        [
+            {"label": "Connected", "value": len(connected)},
+            {"label": "Proposals", "value": len(proposals)},
+            {"label": "Activities", "value": len(activities_in_period)},
+            {"label": "Won Projects", "value": len(won_rows)},
+        ]
     )
-    m4.metric(f"Projects Won ({label})", f"{len(won_rows)} | AED {won_total:,.0f}")
+    report_max = max(int(report_trend["value"].max()) if not report_trend.empty else 0, 1)
+    report_trend_chart = (
+        alt.Chart(report_trend)
+        .mark_bar(cornerRadiusTopLeft=10, cornerRadiusTopRight=10, size=42)
+        .encode(
+            x=alt.X("label:N", title=None, axis=alt.Axis(labelAngle=0, labelFontSize=11)),
+            y=alt.Y("value:Q", title=None, scale=alt.Scale(domain=[0, report_max])),
+            color=alt.Color(
+                "label:N",
+                legend=None,
+                scale=alt.Scale(range=["#0ea5a4", "#38bdf8", "#f97316", "#22c55e"]),
+            ),
+            tooltip=[alt.Tooltip("label:N", title="Metric"), alt.Tooltip("value:Q", title="Count")],
+        )
+        .properties(height=180)
+    )
 
+    st.markdown(
+        f"""
+        <div class='report-hero'>
+            <h3>{label.title()} Sales Performance Report</h3>
+            <p>{start} to {end}. A concise executive view of connected leads, proposals issued, tracked activity, and won business value.</p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    st.markdown(
+        f"""
+        <div class='report-grid'>
+            <div class='report-card'>
+                <div class='kpi-label'>Leads Connected</div>
+                <div class='kpi-value'>{len(connected)}</div>
+                <div class='kpi-note'>Prospects moved into an active conversation during the period.</div>
+            </div>
+            <div class='report-card'>
+                <div class='kpi-label'>Proposals Shared</div>
+                <div class='kpi-value'>{len(proposals)}</div>
+                <div class='kpi-note'>Quoted opportunities issued to the market.</div>
+            </div>
+            <div class='report-card'>
+                <div class='kpi-label'>Proposal Value</div>
+                <div class='kpi-value'>AED {proposal_total:,.0f}</div>
+                <div class='kpi-note'>Total value presented in proposals and quotations.</div>
+            </div>
+            <div class='report-card'>
+                <div class='kpi-label'>Won Projects</div>
+                <div class='kpi-value'>{len(won_rows)} | AED {won_total:,.0f}</div>
+                <div class='kpi-note'>Commercial wins captured in the selected period.</div>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    st.markdown("<div class='report-section'>", unsafe_allow_html=True)
     st.markdown("#### Executive Summary")
     summary_text = (
         f"In this {label} period, {len(connected)} leads were connected, {len(proposals)} proposals were shared, "
@@ -1186,8 +1366,11 @@ def render_period_report(data: dict[str, Any], start: date, end: date, label: st
         f"There were {len(prospect_updates)} prospect updates and {len(activities_in_period)} tracked activities. "
         f"Won project value stands at AED {won_total:,.0f}."
     )
-    st.info(summary_text)
+    st.markdown(f"<div class='report-note'>{summary_text}</div>", unsafe_allow_html=True)
+    st.altair_chart(report_trend_chart, use_container_width=True)
+    st.markdown("</div>", unsafe_allow_html=True)
 
+    st.markdown("<div class='report-section'>", unsafe_allow_html=True)
     st.markdown("#### Leads Connected")
     if connected_df.empty:
         st.info("No connected leads in this period.")
@@ -1202,7 +1385,9 @@ def render_period_report(data: dict[str, Any], start: date, end: date, label: st
             file_name=f"connected_leads_{label.lower()}.csv",
             mime="text/csv",
         )
+    st.markdown("</div>", unsafe_allow_html=True)
 
+    st.markdown("<div class='report-section'>", unsafe_allow_html=True)
     st.markdown("#### Proposals Shared")
     if proposals_df.empty:
         st.info("No proposals shared in this period.")
@@ -1217,7 +1402,9 @@ def render_period_report(data: dict[str, Any], start: date, end: date, label: st
             file_name=f"proposals_{label.lower()}.csv",
             mime="text/csv",
         )
+    st.markdown("</div>", unsafe_allow_html=True)
 
+    st.markdown("<div class='report-section'>", unsafe_allow_html=True)
     st.markdown("#### Next Steps for Proposal Leads")
     if next_steps_df.empty:
         st.info("No next-step records available for proposals in this period.")
@@ -1229,7 +1416,9 @@ def render_period_report(data: dict[str, Any], start: date, end: date, label: st
             file_name=f"proposal_next_steps_{label.lower()}.csv",
             mime="text/csv",
         )
+    st.markdown("</div>", unsafe_allow_html=True)
 
+    st.markdown("<div class='report-section'>", unsafe_allow_html=True)
     st.markdown("#### Latest Prospect Updates")
     if updates_df.empty:
         st.info("No prospect updates in this period.")
@@ -1242,7 +1431,9 @@ def render_period_report(data: dict[str, Any], start: date, end: date, label: st
             file_name=f"prospect_updates_{label.lower()}.csv",
             mime="text/csv",
         )
+    st.markdown("</div>", unsafe_allow_html=True)
 
+    st.markdown("<div class='report-section'>", unsafe_allow_html=True)
     st.markdown("#### Activities Completed")
     if activities_df.empty:
         st.info("No tracked activities in this period.")
@@ -1257,7 +1448,9 @@ def render_period_report(data: dict[str, Any], start: date, end: date, label: st
             file_name=f"activities_{label.lower()}.csv",
             mime="text/csv",
         )
+    st.markdown("</div>", unsafe_allow_html=True)
 
+    st.markdown("<div class='report-section'>", unsafe_allow_html=True)
     st.markdown("#### Won Projects and Commercial Details")
     if won_detail_df.empty:
         st.info("No projects marked as Won in this period.")
@@ -1269,6 +1462,7 @@ def render_period_report(data: dict[str, Any], start: date, end: date, label: st
             file_name=f"won_projects_{label.lower()}.csv",
             mime="text/csv",
         )
+    st.markdown("</div>", unsafe_allow_html=True)
 
 
 def save_report_bundle_to_downloads(
