@@ -8,6 +8,8 @@ import streamlit as st
 
 st.set_page_config(page_title="Custom Sales CRM", page_icon="📈", layout="wide")
 
+APP_RELEASE = "2026-07-29-r1"
+
 DATA_FILE = Path(__file__).parent / "crm_data.json"
 STATUSES = [
     "New Lead",
@@ -239,6 +241,7 @@ def dashboard(data: dict[str, list[dict[str, Any]]]) -> None:
         """,
         unsafe_allow_html=True,
     )
+    st.caption(f"Release: {APP_RELEASE}")
 
     col1, col2, col3, col4, col5 = st.columns(5)
     col1.metric("Customers", len(customers))
