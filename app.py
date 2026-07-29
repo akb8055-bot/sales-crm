@@ -531,6 +531,7 @@ def render_attachment_manager(
     name_field: str,
     attachments_key: str,
     entity_type: str,
+    track_quote_value: bool = False,
 ) -> None:
     attachments = data[attachments_key]
     if not items:
@@ -552,12 +553,61 @@ def render_attachment_manager(
         key=f"{key_prefix}_file_uploader",
     )
 
+    quote_title = ""
+    quote_value = 0.0
+    quote_currency = "AED"
+    quote_status = "Sent"
+    quote_valid_until = date.today()
+    quote_notes = ""
+
+    if track_quote_value:
+        st.markdown("##### Quotation Details")
+        q1, q2 = st.columns(2)
+        quote_title = q1.text_input(
+            "Quotation Title",
+            value=f"Uploaded quotation for {upload_label.split(' | ', 1)[1]}",
+            key=f"{key_prefix}_quote_title",
+        )
+        quote_value = q2.number_input(
+            "Quotation Value (AED)",
+            min_value=0.0,
+            step=1000.0,
+            key=f"{key_prefix}_quote_value",
+        )
+
+        q3, q4 = st.columns(2)
+        quote_currency = q3.selectbox(
+            "Currency",
+            ["AED", "USD", "EUR", "GBP"],
+            index=0,
+            key=f"{key_prefix}_quote_currency",
+        )
+        quote_status = q4.selectbox(
+            "Quotation Status",
+            QUOTE_STATUSES,
+            index=1,
+            key=f"{key_prefix}_quote_status",
+        )
+
+        q5, q6 = st.columns(2)
+        quote_valid_until = q5.date_input(
+            "Valid Until",
+            value=date.today(),
+            key=f"{key_prefix}_quote_valid_until",
+        )
+        quote_notes = q6.text_input(
+            "Notes",
+            value="",
+            key=f"{key_prefix}_quote_notes",
+        )
+
     if st.button("Save Uploaded PDF Files", width="stretch", key=f"{key_prefix}_save_upload_btn"):
         if not uploaded_files:
             st.warning("Please choose one or more PDF files first.")
         else:
             files_for_prospect = attachments.setdefault(upload_prospect_id, [])
             current_ids = [f.get("file_id", "") for f in files_for_prospect]
+            created_quote = False
             for fobj in uploaded_files:
                 new_file = {
                     "file_id": next_id("ATT", current_ids),
@@ -577,8 +627,45 @@ def render_attachment_manager(
                     company_name=entity_name,
                     details=f"Uploaded file {fobj.name}",
                 )
+
+            if track_quote_value and not created_quote:
+                entity_id, entity_name = upload_label.split(" | ", 1)
+                new_quote = {
+                    "id": next_id("Q", [q.get("id", "") for q in data["quotations"]]),
+                    "prospect_id": upload_prospect_id if entity_type == "prospect" else "",
+                    "customer_id": upload_prospect_id if entity_type == "customer" else "",
+                    "customer_name": entity_name,
+                    "source_entity_type": entity_type,
+                    "source_entity_id": upload_prospect_id,
+                    "product_name": quote_title or f"Uploaded quotation for {entity_name}",
+                    "quote_value": float(quote_value or 0),
+                    "currency": quote_currency,
+                    "status": quote_status,
+                    "created_date": today_iso(),
+                    "valid_until": str(quote_valid_until),
+                    "notes": quote_notes,
+                    "attachment_count": len(uploaded_files),
+                }
+                data["quotations"].append(new_quote)
+                log_activity(
+                    data,
+                    activity_type="Proposal Shared",
+                    entity_type=entity_type,
+                    entity_id=entity_id,
+                    company_name=entity_name,
+                    details=f"Uploaded quotation file(s) recorded for AED {float(quote_value or 0):,.0f}",
+                    product_name=new_quote["product_name"],
+                    amount=float(quote_value or 0),
+                    status=quote_status,
+                )
+
             save_data(data)
-            st.success(f"Uploaded {len(uploaded_files)} PDF file(s) for {upload_label}.")
+            if track_quote_value:
+                st.success(
+                    f"Uploaded {len(uploaded_files)} PDF file(s) for {upload_label} and recorded AED {float(quote_value or 0):,.0f} as quotation value."
+                )
+            else:
+                st.success(f"Uploaded {len(uploaded_files)} PDF file(s) for {upload_label}.")
 
     files = attachments.get(upload_prospect_id, [])
     if files:
@@ -888,6 +975,7 @@ def customers_view(data: dict[str, list[dict[str, Any]]]) -> None:
         name_field="company_name",
         attachments_key="customer_attachments",
         entity_type="customer",
+        track_quote_value=True,
     )
 
 
@@ -996,6 +1084,7 @@ def prospects_view(data: dict[str, list[dict[str, Any]]]) -> None:
         name_field="company_name",
         attachments_key="prospect_attachments",
         entity_type="prospect",
+        track_quote_value=True,
     )
 
     with st.expander("Add New Prospect", expanded=False):
@@ -1147,6 +1236,7 @@ def quotations_view(data: dict[str, list[dict[str, Any]]]) -> None:
         name_field="company_name",
         attachments_key="prospect_attachments",
         entity_type="prospect",
+        track_quote_value=True,
     )
 
 
