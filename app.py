@@ -11,7 +11,8 @@ import streamlit as st
 
 st.set_page_config(page_title="Custom Sales CRM", page_icon="📈", layout="wide")
 
-APP_RELEASE = "2026-07-29-r1"
+APP_RELEASE = "2026-07-29-r2"
+DOWNLOADS_DIR = Path.home() / "Downloads"
 
 DATA_FILE = Path(__file__).parent / "crm_data.json"
 STATUSES = [
@@ -290,6 +291,77 @@ def csv_bytes(df: pd.DataFrame) -> bytes:
     return df.to_csv(index=False).encode("utf-8")
 
 
+def render_attachment_manager(data: dict[str, Any], prospects: list[dict[str, Any]], key_prefix: str) -> None:
+    attachments = data["prospect_attachments"]
+    if not prospects:
+        st.info("Create a prospect first to upload quotation PDFs.")
+        return
+
+    upload_options = {f"{p['id']} | {p['company_name']}": p["id"] for p in prospects}
+    upload_label = st.selectbox(
+        "Select prospect",
+        list(upload_options.keys()),
+        key=f"{key_prefix}_upload_prospect_select",
+    )
+    upload_prospect_id = upload_options[upload_label]
+
+    uploaded_files = st.file_uploader(
+        "Upload existing quotation PDF files",
+        type=["pdf"],
+        accept_multiple_files=True,
+        key=f"{key_prefix}_file_uploader",
+    )
+
+    if st.button("Save Uploaded PDF Files", use_container_width=True, key=f"{key_prefix}_save_upload_btn"):
+        if not uploaded_files:
+            st.warning("Please choose one or more PDF files first.")
+        else:
+            files_for_prospect = attachments.setdefault(upload_prospect_id, [])
+            current_ids = [f.get("file_id", "") for f in files_for_prospect]
+            for fobj in uploaded_files:
+                new_file = {
+                    "file_id": next_id("ATT", current_ids),
+                    "file_name": fobj.name,
+                    "mime_type": fobj.type or "application/pdf",
+                    "uploaded_at": now_stamp(),
+                    "content_b64": base64.b64encode(fobj.getvalue()).decode("ascii"),
+                }
+                files_for_prospect.append(new_file)
+                current_ids.append(new_file["file_id"])
+            save_data(data)
+            st.success(f"Uploaded {len(uploaded_files)} PDF file(s) for {upload_label}.")
+
+    files = attachments.get(upload_prospect_id, [])
+    if files:
+        st.write("Uploaded quotation files")
+        for idx, fobj in enumerate(files):
+            file_bytes = base64.b64decode(fobj.get("content_b64", ""))
+            d1, d2 = st.columns([4, 1])
+            with d1:
+                st.download_button(
+                    label=f"Download {fobj.get('file_name', 'file')}",
+                    data=file_bytes,
+                    file_name=fobj.get("file_name", "quotation_file.pdf"),
+                    mime=fobj.get("mime_type", "application/pdf"),
+                    key=f"{key_prefix}_download_{upload_prospect_id}_{idx}",
+                    use_container_width=True,
+                )
+            with d2:
+                if st.button(
+                    "Delete",
+                    key=f"{key_prefix}_delete_{upload_prospect_id}_{idx}",
+                    use_container_width=True,
+                ):
+                    files.pop(idx)
+                    if not files:
+                        attachments.pop(upload_prospect_id, None)
+                    save_data(data)
+                    st.success("File deleted.")
+                    st.rerun()
+    else:
+        st.caption("No quotation PDFs uploaded for this prospect yet.")
+
+
 def dashboard(data: dict[str, list[dict[str, Any]]]) -> None:
     customers = data["customers"]
     prospects = data["prospects"]
@@ -414,7 +486,6 @@ def prospects_view(data: dict[str, list[dict[str, Any]]]) -> None:
     st.subheader("Prospect Tracker")
     prospects = data["prospects"]
     quotes_by_prospect = latest_quote_map(data["quotations"])
-    attachments = data["prospect_attachments"]
 
     if prospects:
         rows = []
@@ -424,7 +495,7 @@ def prospects_view(data: dict[str, list[dict[str, Any]]]) -> None:
             row["quote_generated"] = "Yes" if q else "No"
             row["quote_product_name"] = q.get("product_name", "") if q else ""
             row["quote_value"] = q.get("quote_value", "") if q else ""
-            row["quotation_files"] = len(attachments.get(prospect["id"], []))
+            row["quotation_files"] = len(data["prospect_attachments"].get(prospect["id"], []))
             rows.append(row)
 
         p_df = pd.DataFrame(rows)
@@ -499,62 +570,8 @@ def prospects_view(data: dict[str, list[dict[str, Any]]]) -> None:
         else:
             st.info("Select a prospect from the dropdown to open the edit form.")
 
-    st.markdown("### Upload Quotation Files")
-    if prospects:
-        upload_options = {f"{p['id']} | {p['company_name']}": p["id"] for p in prospects}
-        upload_label = st.selectbox("Prospect for file upload", list(upload_options.keys()), key="upload_prospect_select")
-        upload_prospect_id = upload_options[upload_label]
-
-        uploaded_files = st.file_uploader(
-            "Upload quotation or proposal files",
-            type=["pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx"],
-            accept_multiple_files=True,
-        )
-
-        if st.button("Save Uploaded Files", use_container_width=True):
-            if not uploaded_files:
-                st.warning("Please choose one or more files first.")
-            else:
-                files_for_prospect = attachments.setdefault(upload_prospect_id, [])
-                current_ids = [f.get("file_id", "") for f in files_for_prospect]
-                for fobj in uploaded_files:
-                    new_file = {
-                        "file_id": next_id("ATT", current_ids),
-                        "file_name": fobj.name,
-                        "mime_type": fobj.type or "application/octet-stream",
-                        "uploaded_at": now_stamp(),
-                        "content_b64": base64.b64encode(fobj.getvalue()).decode("ascii"),
-                    }
-                    files_for_prospect.append(new_file)
-                    current_ids.append(new_file["file_id"])
-                save_data(data)
-                st.success(f"Uploaded {len(uploaded_files)} file(s) for {upload_label}.")
-
-        files = attachments.get(upload_prospect_id, [])
-        if files:
-            st.write("Files uploaded for selected prospect")
-            for idx, fobj in enumerate(files):
-                file_bytes = base64.b64decode(fobj.get("content_b64", ""))
-                d1, d2 = st.columns([4, 1])
-                with d1:
-                    st.download_button(
-                        label=f"Download {fobj.get('file_name', 'file')}",
-                        data=file_bytes,
-                        file_name=fobj.get("file_name", "quotation_file"),
-                        mime=fobj.get("mime_type", "application/octet-stream"),
-                        key=f"download_{upload_prospect_id}_{idx}",
-                        use_container_width=True,
-                    )
-                with d2:
-                    if st.button("Delete", key=f"delete_{upload_prospect_id}_{idx}", use_container_width=True):
-                        files.pop(idx)
-                        if not files:
-                            attachments.pop(upload_prospect_id, None)
-                        save_data(data)
-                        st.success("File deleted.")
-                        st.rerun()
-        else:
-            st.caption("No files uploaded for this prospect yet.")
+    st.markdown("### Upload Quotation PDF Files")
+    render_attachment_manager(data, prospects, key_prefix="prospects")
 
     with st.expander("Add New Prospect", expanded=False):
         with st.form("new_prospect_form", clear_on_submit=True):
@@ -670,6 +687,10 @@ def quotations_view(data: dict[str, list[dict[str, Any]]]) -> None:
 
                     save_data(data)
                     st.success(f"Quotation created for {selected_lead['company_name']}.")
+
+    st.markdown("### Upload Existing Quotation PDFs")
+    st.caption("Use this when you already generated quotation PDFs and want to attach them to a lead.")
+    render_attachment_manager(data, prospects, key_prefix="quotations")
 
 
 def pipeline_view(data: dict[str, list[dict[str, Any]]]) -> None:
@@ -830,6 +851,70 @@ def render_period_report(data: dict[str, Any], start: date, end: date, label: st
         )
 
 
+def save_report_bundle_to_downloads(label: str, connected_df: pd.DataFrame, proposals_df: pd.DataFrame, next_steps_df: pd.DataFrame) -> list[Path]:
+    report_dir = DOWNLOADS_DIR / "crm_reports"
+    report_dir.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+    connected_path = report_dir / f"{label}_connected_leads_{stamp}.csv"
+    proposals_path = report_dir / f"{label}_proposals_shared_{stamp}.csv"
+    next_steps_path = report_dir / f"{label}_next_steps_{stamp}.csv"
+
+    connected_df.to_csv(connected_path, index=False)
+    proposals_df.to_csv(proposals_path, index=False)
+    next_steps_df.to_csv(next_steps_path, index=False)
+
+    return [connected_path, proposals_path, next_steps_path]
+
+
+def period_frames(data: dict[str, Any], start: date, end: date) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    prospects = data["prospects"]
+    quotations = data["quotations"]
+
+    connected = [p for p in prospects if date_in_range(p.get("connected_at", ""), start, end)]
+    proposals = [q for q in quotations if date_in_range(q.get("created_date", ""), start, end)]
+    connected_df = pd.DataFrame(connected)
+    proposals_df = pd.DataFrame(proposals)
+
+    prospect_map = {p["id"]: p for p in prospects}
+    next_steps_rows = []
+    for quote in proposals:
+        linked = prospect_map.get(quote.get("prospect_id", ""), {})
+        next_steps_rows.append(
+            {
+                "prospect_id": quote.get("prospect_id", ""),
+                "company_name": quote.get("customer_name", ""),
+                "product_name": quote.get("product_name", ""),
+                "quote_value": quote.get("quote_value", 0),
+                "quote_status": quote.get("status", ""),
+                "next_step": linked.get("next_action", ""),
+                "current_stage": linked.get("status", ""),
+                "expected_close_date": linked.get("expected_close_date", ""),
+            }
+        )
+    next_steps_df = pd.DataFrame(next_steps_rows)
+
+    if connected_df.empty:
+        connected_view = pd.DataFrame(
+            columns=["id", "company_name", "contact_name", "status", "connected_at", "next_action", "estimated_value"]
+        )
+    else:
+        connected_view = connected_df[
+            ["id", "company_name", "contact_name", "status", "connected_at", "next_action", "estimated_value"]
+        ]
+
+    if proposals_df.empty:
+        proposal_view = pd.DataFrame(
+            columns=["id", "prospect_id", "customer_name", "product_name", "quote_value", "status", "created_date"]
+        )
+    else:
+        proposal_view = proposals_df[
+            ["id", "prospect_id", "customer_name", "product_name", "quote_value", "status", "created_date"]
+        ]
+
+    return connected_view, proposal_view, next_steps_df
+
+
 def reports_view(data: dict[str, Any]) -> None:
     st.subheader("Weekly and Monthly Reports")
     st.caption("Dynamic reports for connected leads, proposals shared, and next actions.")
@@ -859,10 +944,30 @@ def reports_view(data: dict[str, Any]) -> None:
     with wtab:
         st.write(f"Period: {active_week_start} to {active_week_end}")
         render_period_report(data, active_week_start, active_week_end, "weekly")
+        weekly_connected, weekly_proposals, weekly_next_steps = period_frames(data, active_week_start, active_week_end)
+        st.caption("Click to save weekly report files directly to your local Downloads/crm_reports folder (local run only).")
+        if st.button("Save Weekly Report Files to Downloads", use_container_width=True):
+            try:
+                files = save_report_bundle_to_downloads("weekly", weekly_connected, weekly_proposals, weekly_next_steps)
+                st.success("Saved weekly report files:")
+                for path in files:
+                    st.write(str(path))
+            except Exception as exc:
+                st.error(f"Could not save report files: {exc}")
 
     with mtab:
         st.write(f"Period: {month_start} to {month_end}")
         render_period_report(data, month_start, month_end, "monthly")
+        monthly_connected, monthly_proposals, monthly_next_steps = period_frames(data, month_start, month_end)
+        st.caption("Click to save monthly report files directly to your local Downloads/crm_reports folder (local run only).")
+        if st.button("Save Monthly Report Files to Downloads", use_container_width=True):
+            try:
+                files = save_report_bundle_to_downloads("monthly", monthly_connected, monthly_proposals, monthly_next_steps)
+                st.success("Saved monthly report files:")
+                for path in files:
+                    st.write(str(path))
+            except Exception as exc:
+                st.error(f"Could not save report files: {exc}")
 
 
 def main() -> None:
