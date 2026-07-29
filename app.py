@@ -11,7 +11,7 @@ import streamlit as st
 
 st.set_page_config(page_title="Custom Sales CRM", page_icon="📈", layout="wide")
 
-APP_RELEASE = "2026-07-29-r2"
+APP_RELEASE = "2026-07-29-r3"
 DOWNLOADS_DIR = Path.home() / "Downloads"
 
 DATA_FILE = Path(__file__).parent / "crm_data.json"
@@ -109,6 +109,22 @@ SAMPLE_DATA = {
             }
         ]
     },
+    "customer_attachments": {},
+    "activity_log": [
+        {
+            "activity_id": "ACT-5001",
+            "activity_type": "Quotation Sent",
+            "entity_type": "prospect",
+            "entity_id": "LEAD-2002",
+            "company_name": "BlueHarbor Stays",
+            "details": "Quotation shared with onboarding support",
+            "product_name": "Sales Intelligence Module",
+            "amount": 62000,
+            "status": "Sent",
+            "activity_date": "2026-07-25",
+            "created_at": "2026-07-25 10:45",
+        }
+    ],
 }
 
 
@@ -229,6 +245,12 @@ def ensure_schema(data: dict[str, Any]) -> bool:
     if "prospect_attachments" not in data or not isinstance(data.get("prospect_attachments"), dict):
         data["prospect_attachments"] = {}
         changed = True
+    if "customer_attachments" not in data or not isinstance(data.get("customer_attachments"), dict):
+        data["customer_attachments"] = {}
+        changed = True
+    if "activity_log" not in data or not isinstance(data.get("activity_log"), list):
+        data["activity_log"] = []
+        changed = True
 
     for prospect in data["prospects"]:
         normalized_estimated = pd.to_numeric(pd.Series([prospect.get("estimated_value", 0)]), errors="coerce").fillna(0.0).iloc[0]
@@ -302,15 +324,53 @@ def csv_bytes(df: pd.DataFrame) -> bytes:
     return df.to_csv(index=False).encode("utf-8")
 
 
-def render_attachment_manager(data: dict[str, Any], prospects: list[dict[str, Any]], key_prefix: str) -> None:
-    attachments = data["prospect_attachments"]
-    if not prospects:
-        st.info("Create a prospect first to upload quotation PDFs.")
+def log_activity(
+    data: dict[str, Any],
+    activity_type: str,
+    entity_type: str,
+    entity_id: str,
+    company_name: str,
+    details: str,
+    product_name: str = "",
+    amount: float = 0.0,
+    status: str = "",
+) -> None:
+    activity_log = data["activity_log"]
+    existing_ids = [x.get("activity_id", "") for x in activity_log]
+    activity_log.append(
+        {
+            "activity_id": next_id("ACT", existing_ids),
+            "activity_type": activity_type,
+            "entity_type": entity_type,
+            "entity_id": entity_id,
+            "company_name": company_name,
+            "details": details,
+            "product_name": product_name,
+            "amount": float(amount or 0),
+            "status": status,
+            "activity_date": today_iso(),
+            "created_at": now_stamp(),
+        }
+    )
+
+
+def render_attachment_manager(
+    data: dict[str, Any],
+    items: list[dict[str, Any]],
+    key_prefix: str,
+    id_field: str,
+    name_field: str,
+    attachments_key: str,
+    entity_type: str,
+) -> None:
+    attachments = data[attachments_key]
+    if not items:
+        st.info("Create records first to upload quotation PDFs.")
         return
 
-    upload_options = {f"{p['id']} | {p['company_name']}": p["id"] for p in prospects}
+    upload_options = {f"{item[id_field]} | {item[name_field]}": item[id_field] for item in items}
     upload_label = st.selectbox(
-        "Select prospect",
+        "Select record",
         list(upload_options.keys()),
         key=f"{key_prefix}_upload_prospect_select",
     )
@@ -339,6 +399,15 @@ def render_attachment_manager(data: dict[str, Any], prospects: list[dict[str, An
                 }
                 files_for_prospect.append(new_file)
                 current_ids.append(new_file["file_id"])
+                entity_id, entity_name = upload_label.split(" | ", 1)
+                log_activity(
+                    data,
+                    activity_type="Quotation PDF Uploaded",
+                    entity_type=entity_type,
+                    entity_id=entity_id,
+                    company_name=entity_name,
+                    details=f"Uploaded file {fobj.name}",
+                )
             save_data(data)
             st.success(f"Uploaded {len(uploaded_files)} PDF file(s) for {upload_label}.")
 
@@ -366,6 +435,15 @@ def render_attachment_manager(data: dict[str, Any], prospects: list[dict[str, An
                     files.pop(idx)
                     if not files:
                         attachments.pop(upload_prospect_id, None)
+                    entity_id, entity_name = upload_label.split(" | ", 1)
+                    log_activity(
+                        data,
+                        activity_type="Quotation PDF Deleted",
+                        entity_type=entity_type,
+                        entity_id=entity_id,
+                        company_name=entity_name,
+                        details=f"Deleted file {fobj.get('file_name', 'quotation_file.pdf')}",
+                    )
                     save_data(data)
                     st.success("File deleted.")
                     st.rerun()
@@ -489,8 +567,28 @@ def customers_view(data: dict[str, list[dict[str, Any]]]) -> None:
                         "notes": notes,
                     }
                     data["customers"].append(new_customer)
+                    log_activity(
+                        data,
+                        activity_type="Customer Added",
+                        entity_type="customer",
+                        entity_id=new_customer["id"],
+                        company_name=company,
+                        details="New customer account created",
+                    )
                     save_data(data)
                     st.success(f"Customer {company} added.")
+
+    st.markdown("### Upload Customer Quotation PDFs")
+    st.caption("Attach quotation PDFs directly to customer accounts.")
+    render_attachment_manager(
+        data,
+        customers,
+        key_prefix="customers",
+        id_field="id",
+        name_field="company_name",
+        attachments_key="customer_attachments",
+        entity_type="customer",
+    )
 
 
 def prospects_view(data: dict[str, list[dict[str, Any]]]) -> None:
@@ -576,13 +674,29 @@ def prospects_view(data: dict[str, list[dict[str, Any]]]) -> None:
                                 if status in CONNECTED_STATUSES and not prospect.get("connected_at"):
                                     prospect["connected_at"] = today_iso()
                                 break
+                        log_activity(
+                            data,
+                            activity_type="Prospect Updated",
+                            entity_type="prospect",
+                            entity_id=selected["id"],
+                            company_name=company,
+                            details=f"Stage updated to {status}; next action: {next_action or 'Not set'}",
+                        )
                         save_data(data)
                         st.success("Prospect updated.")
         else:
             st.info("Select a prospect from the dropdown to open the edit form.")
 
     st.markdown("### Upload Quotation PDF Files")
-    render_attachment_manager(data, prospects, key_prefix="prospects")
+    render_attachment_manager(
+        data,
+        prospects,
+        key_prefix="prospects",
+        id_field="id",
+        name_field="company_name",
+        attachments_key="prospect_attachments",
+        entity_type="prospect",
+    )
 
     with st.expander("Add New Prospect", expanded=False):
         with st.form("new_prospect_form", clear_on_submit=True):
@@ -632,6 +746,14 @@ def prospects_view(data: dict[str, list[dict[str, Any]]]) -> None:
                         "connected_at": today_iso() if status in CONNECTED_STATUSES else "",
                     }
                     data["prospects"].append(new_prospect)
+                    log_activity(
+                        data,
+                        activity_type="Prospect Added",
+                        entity_type="prospect",
+                        entity_id=new_prospect["id"],
+                        company_name=company,
+                        details=f"New prospect created at stage {status}",
+                    )
                     save_data(data)
                     st.success(f"Prospect {company} added.")
 
@@ -700,12 +822,32 @@ def quotations_view(data: dict[str, list[dict[str, Any]]]) -> None:
                             if not p.get("connected_at"):
                                 p["connected_at"] = today_iso()
 
+                    log_activity(
+                        data,
+                        activity_type="Proposal Shared",
+                        entity_type="prospect",
+                        entity_id=selected_lead["id"],
+                        company_name=selected_lead["company_name"],
+                        details=f"Quotation created for {product}",
+                        product_name=product,
+                        amount=float(value or 0),
+                        status=quote_status,
+                    )
+
                     save_data(data)
                     st.success(f"Quotation created for {selected_lead['company_name']}.")
 
     st.markdown("### Upload Existing Quotation PDFs")
     st.caption("Use this when you already generated quotation PDFs and want to attach them to a lead.")
-    render_attachment_manager(data, prospects, key_prefix="quotations")
+    render_attachment_manager(
+        data,
+        prospects,
+        key_prefix="quotations",
+        id_field="id",
+        name_field="company_name",
+        attachments_key="prospect_attachments",
+        entity_type="prospect",
+    )
 
 
 def pipeline_view(data: dict[str, list[dict[str, Any]]]) -> None:
@@ -734,6 +876,15 @@ def pipeline_view(data: dict[str, list[dict[str, Any]]]) -> None:
                 p["updated_at"] = now_stamp()
                 if new_stage in CONNECTED_STATUSES and not p.get("connected_at"):
                     p["connected_at"] = today_iso()
+                log_activity(
+                    data,
+                    activity_type="Stage Updated",
+                    entity_type="prospect",
+                    entity_id=p["id"],
+                    company_name=p["company_name"],
+                    details=f"Pipeline moved to {new_stage}",
+                    status=new_stage,
+                )
                 break
         save_data(data)
         st.success(f"{selected_lead['company_name']} moved to {new_stage}.")
@@ -791,13 +942,22 @@ def insights_view(data: dict[str, list[dict[str, Any]]]) -> None:
 def render_period_report(data: dict[str, Any], start: date, end: date, label: str) -> None:
     prospects = data["prospects"]
     quotations = data["quotations"]
+    activities = data.get("activity_log", [])
 
     connected = [p for p in prospects if date_in_range(p.get("connected_at", ""), start, end)]
     proposals = [q for q in quotations if date_in_range(q.get("created_date", ""), start, end)]
+    prospect_updates = [p for p in prospects if date_in_range(p.get("updated_at", ""), start, end)]
+    activities_in_period = [a for a in activities if date_in_range(a.get("activity_date", ""), start, end)]
+    won_projects = [p for p in prospects if p.get("status") == "Won" and date_in_range(p.get("updated_at", ""), start, end)]
+
     connected_df = pd.DataFrame(connected)
     proposals_df = pd.DataFrame(proposals)
+    updates_df = pd.DataFrame(prospect_updates)
+    activities_df = pd.DataFrame(activities_in_period)
+    won_df = pd.DataFrame(won_projects)
 
     prospect_map = {p["id"]: p for p in prospects}
+    quote_map = latest_quote_map(quotations)
     next_steps_rows = []
     for quote in proposals:
         linked = prospect_map.get(quote.get("prospect_id", ""), {})
@@ -815,13 +975,43 @@ def render_period_report(data: dict[str, Any], start: date, end: date, label: st
         )
     next_steps_df = pd.DataFrame(next_steps_rows)
 
-    m1, m2, m3 = st.columns(3)
+    won_rows = []
+    for project in won_projects:
+        q = quote_map.get(project["id"], {})
+        won_rows.append(
+            {
+                "prospect_id": project.get("id", ""),
+                "company_name": project.get("company_name", ""),
+                "contact_name": project.get("contact_name", ""),
+                "product_name": q.get("product_name", project.get("product_interest", "")),
+                "quotation_value": float(q.get("quote_value", 0) or 0),
+                "quote_status": q.get("status", ""),
+                "won_date": project.get("updated_at", ""),
+                "next_step": project.get("next_action", ""),
+            }
+        )
+    won_detail_df = pd.DataFrame(won_rows)
+
+    proposal_total = sum(float(x.get("quote_value", 0) or 0) for x in proposals)
+    won_total = sum(float(x.get("quotation_value", 0) or 0) for x in won_rows)
+
+    m1, m2, m3, m4 = st.columns(4)
     m1.metric(f"Leads Connected ({label})", len(connected))
     m2.metric(f"Proposals Shared ({label})", len(proposals))
     m3.metric(
         f"Proposal Value ({label})",
-        f"AED {sum(float(x.get('quote_value', 0) or 0) for x in proposals):,.0f}",
+        f"AED {proposal_total:,.0f}",
     )
+    m4.metric(f"Projects Won ({label})", f"{len(won_rows)} | AED {won_total:,.0f}")
+
+    st.markdown("#### Executive Summary")
+    summary_text = (
+        f"In this {label} period, {len(connected)} leads were connected, {len(proposals)} proposals were shared, "
+        f"and total quoted value reached AED {proposal_total:,.0f}. "
+        f"There were {len(prospect_updates)} prospect updates and {len(activities_in_period)} tracked activities. "
+        f"Won project value stands at AED {won_total:,.0f}."
+    )
+    st.info(summary_text)
 
     st.markdown("#### Leads Connected")
     if connected_df.empty:
@@ -865,8 +1055,55 @@ def render_period_report(data: dict[str, Any], start: date, end: date, label: st
             mime="text/csv",
         )
 
+    st.markdown("#### Latest Prospect Updates")
+    if updates_df.empty:
+        st.info("No prospect updates in this period.")
+    else:
+        updates_view = updates_df[["id", "company_name", "status", "updated_at", "next_action", "notes"]]
+        st.dataframe(updates_view, width="stretch", hide_index=True)
+        st.download_button(
+            "Download Prospect Updates CSV",
+            data=csv_bytes(updates_view),
+            file_name=f"prospect_updates_{label.lower()}.csv",
+            mime="text/csv",
+        )
 
-def save_report_bundle_to_downloads(label: str, connected_df: pd.DataFrame, proposals_df: pd.DataFrame, next_steps_df: pd.DataFrame) -> list[Path]:
+    st.markdown("#### Activities Completed")
+    if activities_df.empty:
+        st.info("No tracked activities in this period.")
+    else:
+        activities_view = activities_df[
+            ["activity_id", "activity_type", "company_name", "details", "product_name", "amount", "activity_date", "status"]
+        ]
+        st.dataframe(activities_view, width="stretch", hide_index=True)
+        st.download_button(
+            "Download Activities CSV",
+            data=csv_bytes(activities_view),
+            file_name=f"activities_{label.lower()}.csv",
+            mime="text/csv",
+        )
+
+    st.markdown("#### Won Projects and Commercial Details")
+    if won_detail_df.empty:
+        st.info("No projects marked as Won in this period.")
+    else:
+        st.dataframe(won_detail_df, width="stretch", hide_index=True)
+        st.download_button(
+            "Download Won Projects CSV",
+            data=csv_bytes(won_detail_df),
+            file_name=f"won_projects_{label.lower()}.csv",
+            mime="text/csv",
+        )
+
+
+def save_report_bundle_to_downloads(
+    label: str,
+    connected_df: pd.DataFrame,
+    proposals_df: pd.DataFrame,
+    next_steps_df: pd.DataFrame,
+    activities_df: pd.DataFrame,
+    won_df: pd.DataFrame,
+) -> list[Path]:
     report_dir = DOWNLOADS_DIR / "crm_reports"
     report_dir.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -874,22 +1111,30 @@ def save_report_bundle_to_downloads(label: str, connected_df: pd.DataFrame, prop
     connected_path = report_dir / f"{label}_connected_leads_{stamp}.csv"
     proposals_path = report_dir / f"{label}_proposals_shared_{stamp}.csv"
     next_steps_path = report_dir / f"{label}_next_steps_{stamp}.csv"
+    activities_path = report_dir / f"{label}_activities_{stamp}.csv"
+    won_path = report_dir / f"{label}_won_projects_{stamp}.csv"
 
     connected_df.to_csv(connected_path, index=False)
     proposals_df.to_csv(proposals_path, index=False)
     next_steps_df.to_csv(next_steps_path, index=False)
+    activities_df.to_csv(activities_path, index=False)
+    won_df.to_csv(won_path, index=False)
 
-    return [connected_path, proposals_path, next_steps_path]
+    return [connected_path, proposals_path, next_steps_path, activities_path, won_path]
 
 
-def period_frames(data: dict[str, Any], start: date, end: date) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+def period_frames(data: dict[str, Any], start: date, end: date) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     prospects = data["prospects"]
     quotations = data["quotations"]
+    activities = data.get("activity_log", [])
 
     connected = [p for p in prospects if date_in_range(p.get("connected_at", ""), start, end)]
     proposals = [q for q in quotations if date_in_range(q.get("created_date", ""), start, end)]
+    activities_in_period = [a for a in activities if date_in_range(a.get("activity_date", ""), start, end)]
+    won_projects = [p for p in prospects if p.get("status") == "Won" and date_in_range(p.get("updated_at", ""), start, end)]
     connected_df = pd.DataFrame(connected)
     proposals_df = pd.DataFrame(proposals)
+    activities_df = pd.DataFrame(activities_in_period)
 
     prospect_map = {p["id"]: p for p in prospects}
     next_steps_rows = []
@@ -909,6 +1154,24 @@ def period_frames(data: dict[str, Any], start: date, end: date) -> tuple[pd.Data
         )
     next_steps_df = pd.DataFrame(next_steps_rows)
 
+    quote_map = latest_quote_map(quotations)
+    won_rows = []
+    for project in won_projects:
+        q = quote_map.get(project["id"], {})
+        won_rows.append(
+            {
+                "prospect_id": project.get("id", ""),
+                "company_name": project.get("company_name", ""),
+                "contact_name": project.get("contact_name", ""),
+                "product_name": q.get("product_name", project.get("product_interest", "")),
+                "quotation_value": float(q.get("quote_value", 0) or 0),
+                "quote_status": q.get("status", ""),
+                "won_date": project.get("updated_at", ""),
+                "next_step": project.get("next_action", ""),
+            }
+        )
+    won_df = pd.DataFrame(won_rows)
+
     if connected_df.empty:
         connected_view = pd.DataFrame(
             columns=["id", "company_name", "contact_name", "status", "connected_at", "next_action", "estimated_value"]
@@ -927,7 +1190,25 @@ def period_frames(data: dict[str, Any], start: date, end: date) -> tuple[pd.Data
             ["id", "prospect_id", "customer_name", "product_name", "quote_value", "status", "created_date"]
         ]
 
-    return connected_view, proposal_view, next_steps_df
+    if activities_df.empty:
+        activities_view = pd.DataFrame(
+            columns=["activity_id", "activity_type", "company_name", "details", "product_name", "amount", "activity_date", "status"]
+        )
+    else:
+        activities_view = activities_df[
+            ["activity_id", "activity_type", "company_name", "details", "product_name", "amount", "activity_date", "status"]
+        ]
+
+    if won_df.empty:
+        won_view = pd.DataFrame(
+            columns=["prospect_id", "company_name", "contact_name", "product_name", "quotation_value", "quote_status", "won_date", "next_step"]
+        )
+    else:
+        won_view = won_df[
+            ["prospect_id", "company_name", "contact_name", "product_name", "quotation_value", "quote_status", "won_date", "next_step"]
+        ]
+
+    return connected_view, proposal_view, next_steps_df, activities_view, won_view
 
 
 def reports_view(data: dict[str, Any]) -> None:
@@ -959,11 +1240,18 @@ def reports_view(data: dict[str, Any]) -> None:
     with wtab:
         st.write(f"Period: {active_week_start} to {active_week_end}")
         render_period_report(data, active_week_start, active_week_end, "weekly")
-        weekly_connected, weekly_proposals, weekly_next_steps = period_frames(data, active_week_start, active_week_end)
+        weekly_connected, weekly_proposals, weekly_next_steps, weekly_activities, weekly_won = period_frames(data, active_week_start, active_week_end)
         st.caption("Click to save weekly report files directly to your local Downloads/crm_reports folder (local run only).")
         if st.button("Save Weekly Report Files to Downloads", width="stretch"):
             try:
-                files = save_report_bundle_to_downloads("weekly", weekly_connected, weekly_proposals, weekly_next_steps)
+                files = save_report_bundle_to_downloads(
+                    "weekly",
+                    weekly_connected,
+                    weekly_proposals,
+                    weekly_next_steps,
+                    weekly_activities,
+                    weekly_won,
+                )
                 st.success("Saved weekly report files:")
                 for path in files:
                     st.write(str(path))
@@ -973,11 +1261,18 @@ def reports_view(data: dict[str, Any]) -> None:
     with mtab:
         st.write(f"Period: {month_start} to {month_end}")
         render_period_report(data, month_start, month_end, "monthly")
-        monthly_connected, monthly_proposals, monthly_next_steps = period_frames(data, month_start, month_end)
+        monthly_connected, monthly_proposals, monthly_next_steps, monthly_activities, monthly_won = period_frames(data, month_start, month_end)
         st.caption("Click to save monthly report files directly to your local Downloads/crm_reports folder (local run only).")
         if st.button("Save Monthly Report Files to Downloads", width="stretch"):
             try:
-                files = save_report_bundle_to_downloads("monthly", monthly_connected, monthly_proposals, monthly_next_steps)
+                files = save_report_bundle_to_downloads(
+                    "monthly",
+                    monthly_connected,
+                    monthly_proposals,
+                    monthly_next_steps,
+                    monthly_activities,
+                    monthly_won,
+                )
                 st.success("Saved monthly report files:")
                 for path in files:
                     st.write(str(path))
