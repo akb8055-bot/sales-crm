@@ -25,3 +25,5 @@ cd /Users/aadi/sales-crm
 - `Insights`: revenue views by product and quote status
 
 Data is stored locally in `crm_data.json` and auto-created on first launch.
+
+Last deploy trigger update: 2026-07-29
