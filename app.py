@@ -1,5 +1,8 @@
 import json
+import base64
+import calendar
 from datetime import date, datetime
+from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
@@ -21,6 +24,7 @@ STATUSES = [
     "Lost",
 ]
 QUOTE_STATUSES = ["Draft", "Sent", "Accepted", "Rejected"]
+CONNECTED_STATUSES = {"Contacted", "Qualified", "Proposal Sent", "Negotiation", "Won"}
 
 
 SAMPLE_DATA = {
@@ -93,6 +97,17 @@ SAMPLE_DATA = {
             "notes": "Includes onboarding and 6 months support",
         }
     ],
+    "prospect_attachments": {
+        "LEAD-2002": [
+            {
+                "file_id": "ATT-4001",
+                "file_name": "BlueHarbor_Quote_July.pdf",
+                "mime_type": "application/pdf",
+                "uploaded_at": "2026-07-25 10:40",
+                "content_b64": "U2FtcGxlIFF1b3RhdGlvbiBGaWxl",
+            }
+        ]
+    },
 }
 
 
@@ -186,6 +201,10 @@ def now_stamp() -> str:
     return datetime.now().strftime("%Y-%m-%d %H:%M")
 
 
+def today_iso() -> str:
+    return str(date.today())
+
+
 def load_data() -> dict[str, list[dict[str, Any]]]:
     if not DATA_FILE.exists():
         save_data(SAMPLE_DATA)
@@ -193,6 +212,32 @@ def load_data() -> dict[str, list[dict[str, Any]]]:
 
     with DATA_FILE.open("r", encoding="utf-8") as f:
         return json.load(f)
+
+
+def ensure_schema(data: dict[str, Any]) -> bool:
+    changed = False
+    if "customers" not in data:
+        data["customers"] = []
+        changed = True
+    if "prospects" not in data:
+        data["prospects"] = []
+        changed = True
+    if "quotations" not in data:
+        data["quotations"] = []
+        changed = True
+    if "prospect_attachments" not in data or not isinstance(data.get("prospect_attachments"), dict):
+        data["prospect_attachments"] = {}
+        changed = True
+
+    for prospect in data["prospects"]:
+        if "connected_at" not in prospect:
+            if prospect.get("status") in CONNECTED_STATUSES:
+                prospect["connected_at"] = prospect.get("updated_at", today_iso())[:10]
+            else:
+                prospect["connected_at"] = ""
+            changed = True
+
+    return changed
 
 
 def save_data(data: dict[str, list[dict[str, Any]]]) -> None:
@@ -220,6 +265,29 @@ def latest_quote_map(quotations: list[dict[str, Any]]) -> dict[str, dict[str, An
         if prospect_id and prospect_id not in by_prospect:
             by_prospect[prospect_id] = quote
     return by_prospect
+
+
+def safe_parse_date(value: str) -> date | None:
+    if not value:
+        return None
+    text = str(value).strip()
+    for fmt in ("%Y-%m-%d", "%Y-%m-%d %H:%M"):
+        try:
+            return datetime.strptime(text, fmt).date()
+        except ValueError:
+            continue
+    return None
+
+
+def date_in_range(value: str, start: date, end: date) -> bool:
+    parsed = safe_parse_date(value)
+    return bool(parsed and start <= parsed <= end)
+
+
+def csv_bytes(df: pd.DataFrame) -> bytes:
+    if df.empty:
+        return b""
+    return df.to_csv(index=False).encode("utf-8")
 
 
 def dashboard(data: dict[str, list[dict[str, Any]]]) -> None:
@@ -346,6 +414,7 @@ def prospects_view(data: dict[str, list[dict[str, Any]]]) -> None:
     st.subheader("Prospect Tracker")
     prospects = data["prospects"]
     quotes_by_prospect = latest_quote_map(data["quotations"])
+    attachments = data["prospect_attachments"]
 
     if prospects:
         rows = []
@@ -355,12 +424,137 @@ def prospects_view(data: dict[str, list[dict[str, Any]]]) -> None:
             row["quote_generated"] = "Yes" if q else "No"
             row["quote_product_name"] = q.get("product_name", "") if q else ""
             row["quote_value"] = q.get("quote_value", "") if q else ""
+            row["quotation_files"] = len(attachments.get(prospect["id"], []))
             rows.append(row)
 
         p_df = pd.DataFrame(rows)
         st.dataframe(p_df, use_container_width=True, hide_index=True)
     else:
         st.info("No prospects yet. Add leads and opportunities below.")
+
+    st.markdown("### Edit Prospect")
+    if prospects:
+        lead_options = {f"{p['id']} | {p['company_name']}": p for p in prospects}
+        selected_label = st.selectbox(
+            "Select a prospect to edit",
+            ["Select prospect..."] + list(lead_options.keys()),
+        )
+        selected = lead_options.get(selected_label)
+
+        if selected:
+            with st.form(f"edit_prospect_{selected['id']}"):
+                p1, p2, p3 = st.columns(3)
+                company = p1.text_input("Company Name*", value=selected.get("company_name", ""))
+                contact = p2.text_input("Contact Name*", value=selected.get("contact_name", ""))
+                current_status = selected.get("status", "New Lead")
+                status_index = STATUSES.index(current_status) if current_status in STATUSES else 0
+                status = p3.selectbox("Status", STATUSES, index=status_index)
+
+                q1, q2, q3 = st.columns(3)
+                email = q1.text_input("Email", value=selected.get("email", ""))
+                phone = q2.text_input("Phone", value=selected.get("phone", ""))
+                source = q3.text_input("Lead Source", value=selected.get("source", ""))
+
+                r1, r2, r3 = st.columns(3)
+                industry = r1.text_input("Industry", value=selected.get("industry", ""))
+                product_interest = r2.text_input("Product Interest", value=selected.get("product_interest", ""))
+                est_value = r3.number_input(
+                    "Estimated Value (AED)",
+                    min_value=0.0,
+                    step=1000.0,
+                    value=float(selected.get("estimated_value", 0) or 0),
+                )
+
+                close_default = safe_parse_date(selected.get("expected_close_date", "")) or date.today()
+                s1, s2 = st.columns(2)
+                expected_close = s1.date_input("Expected Close Date", value=close_default)
+                next_action = s2.text_input("Next Action", value=selected.get("next_action", ""))
+                notes = st.text_area("Notes", value=selected.get("notes", ""))
+
+                submitted_edit = st.form_submit_button("Save Prospect Changes", use_container_width=True)
+                if submitted_edit:
+                    if not company or not contact:
+                        st.error("Company name and contact are required.")
+                    else:
+                        for prospect in data["prospects"]:
+                            if prospect["id"] == selected["id"]:
+                                prospect["company_name"] = company
+                                prospect["contact_name"] = contact
+                                prospect["status"] = status
+                                prospect["email"] = email
+                                prospect["phone"] = phone
+                                prospect["source"] = source
+                                prospect["industry"] = industry
+                                prospect["product_interest"] = product_interest
+                                prospect["estimated_value"] = est_value
+                                prospect["expected_close_date"] = str(expected_close)
+                                prospect["next_action"] = next_action
+                                prospect["notes"] = notes
+                                prospect["updated_at"] = now_stamp()
+                                if status in CONNECTED_STATUSES and not prospect.get("connected_at"):
+                                    prospect["connected_at"] = today_iso()
+                                break
+                        save_data(data)
+                        st.success("Prospect updated.")
+        else:
+            st.info("Select a prospect from the dropdown to open the edit form.")
+
+    st.markdown("### Upload Quotation Files")
+    if prospects:
+        upload_options = {f"{p['id']} | {p['company_name']}": p["id"] for p in prospects}
+        upload_label = st.selectbox("Prospect for file upload", list(upload_options.keys()), key="upload_prospect_select")
+        upload_prospect_id = upload_options[upload_label]
+
+        uploaded_files = st.file_uploader(
+            "Upload quotation or proposal files",
+            type=["pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx"],
+            accept_multiple_files=True,
+        )
+
+        if st.button("Save Uploaded Files", use_container_width=True):
+            if not uploaded_files:
+                st.warning("Please choose one or more files first.")
+            else:
+                files_for_prospect = attachments.setdefault(upload_prospect_id, [])
+                current_ids = [f.get("file_id", "") for f in files_for_prospect]
+                for fobj in uploaded_files:
+                    new_file = {
+                        "file_id": next_id("ATT", current_ids),
+                        "file_name": fobj.name,
+                        "mime_type": fobj.type or "application/octet-stream",
+                        "uploaded_at": now_stamp(),
+                        "content_b64": base64.b64encode(fobj.getvalue()).decode("ascii"),
+                    }
+                    files_for_prospect.append(new_file)
+                    current_ids.append(new_file["file_id"])
+                save_data(data)
+                st.success(f"Uploaded {len(uploaded_files)} file(s) for {upload_label}.")
+
+        files = attachments.get(upload_prospect_id, [])
+        if files:
+            st.write("Files uploaded for selected prospect")
+            for idx, fobj in enumerate(files):
+                file_bytes = base64.b64decode(fobj.get("content_b64", ""))
+                d1, d2 = st.columns([4, 1])
+                with d1:
+                    st.download_button(
+                        label=f"Download {fobj.get('file_name', 'file')}",
+                        data=file_bytes,
+                        file_name=fobj.get("file_name", "quotation_file"),
+                        mime=fobj.get("mime_type", "application/octet-stream"),
+                        key=f"download_{upload_prospect_id}_{idx}",
+                        use_container_width=True,
+                    )
+                with d2:
+                    if st.button("Delete", key=f"delete_{upload_prospect_id}_{idx}", use_container_width=True):
+                        files.pop(idx)
+                        if not files:
+                            attachments.pop(upload_prospect_id, None)
+                        save_data(data)
+                        st.success("File deleted.")
+                        st.rerun()
+        else:
+            st.caption("No files uploaded for this prospect yet.")
 
     with st.expander("Add New Prospect", expanded=False):
         with st.form("new_prospect_form", clear_on_submit=True):
@@ -407,6 +601,7 @@ def prospects_view(data: dict[str, list[dict[str, Any]]]) -> None:
                         "notes": notes,
                         "created_at": now_stamp(),
                         "updated_at": now_stamp(),
+                        "connected_at": today_iso() if status in CONNECTED_STATUSES else "",
                     }
                     data["prospects"].append(new_prospect)
                     save_data(data)
@@ -470,6 +665,8 @@ def quotations_view(data: dict[str, list[dict[str, Any]]]) -> None:
                         if p["id"] == selected_lead["id"] and p["status"] in {"New Lead", "Contacted", "Qualified"}:
                             p["status"] = "Proposal Sent"
                             p["updated_at"] = now_stamp()
+                            if not p.get("connected_at"):
+                                p["connected_at"] = today_iso()
 
                     save_data(data)
                     st.success(f"Quotation created for {selected_lead['company_name']}.")
@@ -499,6 +696,8 @@ def pipeline_view(data: dict[str, list[dict[str, Any]]]) -> None:
             if p["id"] == selected_lead["id"]:
                 p["status"] = new_stage
                 p["updated_at"] = now_stamp()
+                if new_stage in CONNECTED_STATUSES and not p.get("connected_at"):
+                    p["connected_at"] = today_iso()
                 break
         save_data(data)
         st.success(f"{selected_lead['company_name']} moved to {new_stage}.")
@@ -553,15 +752,130 @@ def insights_view(data: dict[str, list[dict[str, Any]]]) -> None:
         st.info("Quotations required for quote insights.")
 
 
+def render_period_report(data: dict[str, Any], start: date, end: date, label: str) -> None:
+    prospects = data["prospects"]
+    quotations = data["quotations"]
+
+    connected = [p for p in prospects if date_in_range(p.get("connected_at", ""), start, end)]
+    proposals = [q for q in quotations if date_in_range(q.get("created_date", ""), start, end)]
+    connected_df = pd.DataFrame(connected)
+    proposals_df = pd.DataFrame(proposals)
+
+    prospect_map = {p["id"]: p for p in prospects}
+    next_steps_rows = []
+    for quote in proposals:
+        linked = prospect_map.get(quote.get("prospect_id", ""), {})
+        next_steps_rows.append(
+            {
+                "prospect_id": quote.get("prospect_id", ""),
+                "company_name": quote.get("customer_name", ""),
+                "product_name": quote.get("product_name", ""),
+                "quote_value": quote.get("quote_value", 0),
+                "quote_status": quote.get("status", ""),
+                "next_step": linked.get("next_action", ""),
+                "current_stage": linked.get("status", ""),
+                "expected_close_date": linked.get("expected_close_date", ""),
+            }
+        )
+    next_steps_df = pd.DataFrame(next_steps_rows)
+
+    m1, m2, m3 = st.columns(3)
+    m1.metric(f"Leads Connected ({label})", len(connected))
+    m2.metric(f"Proposals Shared ({label})", len(proposals))
+    m3.metric(
+        f"Proposal Value ({label})",
+        f"AED {sum(float(x.get('quote_value', 0) or 0) for x in proposals):,.0f}",
+    )
+
+    st.markdown("#### Leads Connected")
+    if connected_df.empty:
+        st.info("No connected leads in this period.")
+    else:
+        connected_view = connected_df[
+            ["id", "company_name", "contact_name", "status", "connected_at", "next_action", "estimated_value"]
+        ]
+        st.dataframe(connected_view, use_container_width=True, hide_index=True)
+        st.download_button(
+            "Download Connected Leads CSV",
+            data=csv_bytes(connected_view),
+            file_name=f"connected_leads_{label.lower()}.csv",
+            mime="text/csv",
+        )
+
+    st.markdown("#### Proposals Shared")
+    if proposals_df.empty:
+        st.info("No proposals shared in this period.")
+    else:
+        proposal_view = proposals_df[
+            ["id", "prospect_id", "customer_name", "product_name", "quote_value", "status", "created_date"]
+        ]
+        st.dataframe(proposal_view, use_container_width=True, hide_index=True)
+        st.download_button(
+            "Download Proposals CSV",
+            data=csv_bytes(proposal_view),
+            file_name=f"proposals_{label.lower()}.csv",
+            mime="text/csv",
+        )
+
+    st.markdown("#### Next Steps for Proposal Leads")
+    if next_steps_df.empty:
+        st.info("No next-step records available for proposals in this period.")
+    else:
+        st.dataframe(next_steps_df, use_container_width=True, hide_index=True)
+        st.download_button(
+            "Download Next Steps CSV",
+            data=csv_bytes(next_steps_df),
+            file_name=f"proposal_next_steps_{label.lower()}.csv",
+            mime="text/csv",
+        )
+
+
+def reports_view(data: dict[str, Any]) -> None:
+    st.subheader("Weekly and Monthly Reports")
+    st.caption("Dynamic reports for connected leads, proposals shared, and next actions.")
+
+    current_day = date.today()
+    week_start = current_day - timedelta(days=current_day.weekday())
+    week_end = week_start + timedelta(days=6)
+
+    r1, r2 = st.columns(2)
+    with r1:
+        selected_week = st.date_input("Report week anchor date", value=current_day)
+    with r2:
+        selected_month = st.selectbox(
+            "Report month",
+            list(range(1, 13)),
+            index=current_day.month - 1,
+            format_func=lambda m: f"{calendar.month_name[m]} {current_day.year}",
+        )
+
+    active_week_start = selected_week - timedelta(days=selected_week.weekday())
+    active_week_end = active_week_start + timedelta(days=6)
+    month_start = date(current_day.year, selected_month, 1)
+    month_end = date(current_day.year, selected_month, calendar.monthrange(current_day.year, selected_month)[1])
+
+    wtab, mtab = st.tabs(["Weekly", "Monthly"])
+
+    with wtab:
+        st.write(f"Period: {active_week_start} to {active_week_end}")
+        render_period_report(data, active_week_start, active_week_end, "weekly")
+
+    with mtab:
+        st.write(f"Period: {month_start} to {month_end}")
+        render_period_report(data, month_start, month_end, "monthly")
+
+
 def main() -> None:
     style_app()
     data = load_data()
+    if ensure_schema(data):
+        save_data(data)
 
     with st.sidebar:
         st.title("Sales Workspace")
         section = st.radio(
             "Go to",
-            ["Dashboard", "Customers", "Prospects", "Pipeline", "Quotations", "Insights"],
+            ["Dashboard", "Customers", "Prospects", "Pipeline", "Quotations", "Insights", "Reports"],
             label_visibility="collapsed",
         )
         st.markdown("---")
@@ -581,6 +895,8 @@ def main() -> None:
         quotations_view(data)
     elif section == "Insights":
         insights_view(data)
+    elif section == "Reports":
+        reports_view(data)
 
 
 if __name__ == "__main__":
