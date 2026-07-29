@@ -78,9 +78,147 @@ def style_app() -> None:
                 box-shadow: 0 14px 30px rgba(12, 22, 34, 0.2);
             }
 
+            .hero-eyebrow {
+                display: inline-flex;
+                align-items: center;
+                gap: 8px;
+                padding: 6px 10px;
+                border-radius: 999px;
+                background: rgba(255, 255, 255, 0.12);
+                color: #e8fffc;
+                font-size: 0.78rem;
+                text-transform: uppercase;
+                letter-spacing: 0.12em;
+                margin-bottom: 12px;
+            }
+
+            .hero-title {
+                margin: 0;
+                font-size: 2rem;
+                line-height: 1.1;
+            }
+
             .hero p {
                 margin: 4px 0 0;
                 color: #ccf0ed;
+            }
+
+            .hero-subtitle {
+                max-width: 68ch;
+                font-size: 0.98rem;
+                line-height: 1.55;
+                color: #d5f6f1;
+                margin-top: 10px;
+            }
+
+            .dashboard-grid {
+                display: grid;
+                grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+                gap: 12px;
+                margin: 12px 0 6px;
+            }
+
+            .stat-card {
+                background: rgba(255, 255, 255, 0.9);
+                border: 1px solid rgba(15, 30, 42, 0.08);
+                border-radius: 18px;
+                padding: 16px 18px 16px 20px;
+                box-shadow: 0 14px 28px rgba(15, 31, 45, 0.08);
+                position: relative;
+                overflow: hidden;
+            }
+
+            .stat-card::before {
+                content: '';
+                position: absolute;
+                inset: 0 auto 0 0;
+                width: 4px;
+                background: linear-gradient(180deg, var(--accent), var(--accent-2));
+            }
+
+            .stat-label {
+                color: var(--muted);
+                font-size: 0.8rem;
+                text-transform: uppercase;
+                letter-spacing: 0.12em;
+                margin-bottom: 8px;
+            }
+
+            .stat-value {
+                font-size: 1.55rem;
+                font-weight: 700;
+                letter-spacing: -0.03em;
+                margin-bottom: 4px;
+            }
+
+            .stat-footnote {
+                color: var(--muted);
+                font-size: 0.88rem;
+            }
+
+            .section-card {
+                background: rgba(255, 255, 255, 0.88);
+                border: 1px solid rgba(16, 30, 42, 0.08);
+                border-radius: 20px;
+                padding: 18px;
+                box-shadow: 0 14px 28px rgba(15, 31, 45, 0.06);
+                margin-bottom: 4px;
+            }
+
+            .section-card h3 {
+                margin-top: 0;
+            }
+
+            .status-strip {
+                display: grid;
+                grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+                gap: 10px;
+                margin: 10px 0 0;
+            }
+
+            .status-pill {
+                border-radius: 14px;
+                padding: 10px 12px;
+                background: #f7fbfb;
+                border: 1px solid rgba(15, 30, 42, 0.06);
+            }
+
+            .status-pill .label {
+                display: block;
+                color: var(--muted);
+                font-size: 0.76rem;
+                text-transform: uppercase;
+                letter-spacing: 0.12em;
+                margin-bottom: 5px;
+            }
+
+            .status-pill .value {
+                font-weight: 700;
+                font-size: 1rem;
+            }
+
+            .empty-state {
+                border: 1px dashed rgba(15, 30, 42, 0.18);
+                border-radius: 16px;
+                padding: 16px;
+                background: rgba(255, 255, 255, 0.75);
+                color: var(--muted);
+            }
+
+            .timeline-item {
+                padding: 12px 0;
+                border-bottom: 1px solid rgba(15, 30, 42, 0.08);
+            }
+
+            .timeline-item:last-child {
+                border-bottom: 0;
+                padding-bottom: 0;
+            }
+
+            .timeline-meta {
+                color: var(--muted);
+                font-size: 0.82rem;
+                margin-top: 4px;
             }
 
             .metric-card {
@@ -386,61 +524,143 @@ def dashboard(data: dict[str, list[dict[str, Any]]]) -> None:
     customers = sanitize_customers(data["customers"])
     prospects = data["prospects"]
     quotations = data["quotations"]
+    activities = data.get("activity_log", [])
 
     total_pipeline = sum(float(p.get("estimated_value", 0) or 0) for p in prospects if p.get("status") != "Lost")
     won_value = sum(float(p.get("estimated_value", 0) or 0) for p in prospects if p.get("status") == "Won")
     open_leads = sum(1 for p in prospects if p.get("status") not in {"Won", "Lost"})
     conversion = (sum(1 for p in prospects if p.get("status") == "Won") / len(prospects) * 100) if prospects else 0
+    connected = sum(1 for p in prospects if p.get("status") in CONNECTED_STATUSES)
+    latest_activity = sorted(activities, key=lambda item: item.get("created_at", ""), reverse=True)[:3]
+    top_status_df = (
+        pd.DataFrame(prospects)["status"].value_counts().reindex(STATUSES, fill_value=0)
+        if prospects
+        else pd.Series([0] * len(STATUSES), index=STATUSES)
+    )
+    top_prospect = None
+    if prospects:
+        top_prospect = max(prospects, key=lambda p: float(p.get("estimated_value", 0) or 0))
+    latest_quote = None
+    if quotations:
+        latest_quote = sorted(quotations, key=lambda q: q.get("created_date", ""), reverse=True)[0]
 
     st.markdown(
         """
         <div class='hero'>
-            <h2 style='margin:0;'>Metalys Enclosures Manufacturing</h2>
-            <p>Sales CRM</p>
+            <div class='hero-eyebrow'>Sales command center</div>
+            <h2 class='hero-title'>Metalys Enclosures Manufacturing</h2>
+            <div class='hero-subtitle'>A premium CRM workspace for tracking customers, prospect movement, quotation value, and sales activity without losing sight of the next action.</div>
         </div>
         """,
         unsafe_allow_html=True,
     )
     st.caption(f"Release: {APP_RELEASE}")
 
-    col1, col2, col3, col4, col5 = st.columns(5)
-    col1.metric("Customers", len(customers))
-    col2.metric("Prospects", len(prospects))
-    col3.metric("Open Pipeline", f"AED {total_pipeline:,.0f}")
-    col4.metric("Won Value", f"AED {won_value:,.0f}")
-    col5.metric("Win Rate", f"{conversion:.1f}%")
+    st.markdown(
+        f"""
+        <div class='dashboard-grid'>
+            <div class='stat-card'>
+                <div class='stat-label'>Customers</div>
+                <div class='stat-value'>{len(customers)}</div>
+                <div class='stat-footnote'>Active accounts in the system</div>
+            </div>
+            <div class='stat-card'>
+                <div class='stat-label'>Prospects</div>
+                <div class='stat-value'>{len(prospects)}</div>
+                <div class='stat-footnote'>{connected} connected, {open_leads} open leads</div>
+            </div>
+            <div class='stat-card'>
+                <div class='stat-label'>Open Pipeline</div>
+                <div class='stat-value'>AED {total_pipeline:,.0f}</div>
+                <div class='stat-footnote'>Estimated value still in motion</div>
+            </div>
+            <div class='stat-card'>
+                <div class='stat-label'>Won Value</div>
+                <div class='stat-value'>AED {won_value:,.0f}</div>
+                <div class='stat-footnote'>Closed business captured so far</div>
+            </div>
+            <div class='stat-card'>
+                <div class='stat-label'>Win Rate</div>
+                <div class='stat-value'>{conversion:.1f}%</div>
+                <div class='stat-footnote'>{len(quotations)} quotations issued</div>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    st.markdown("### At a Glance")
+    glance_left, glance_mid, glance_right = st.columns(3)
+    with glance_left:
+        st.markdown("<div class='section-card'>", unsafe_allow_html=True)
+        st.markdown("#### Pipeline Health")
+        st.markdown(
+            f"<div class='status-strip'><div class='status-pill'><span class='label'>Open</span><span class='value'>{open_leads}</span></div><div class='status-pill'><span class='label'>Connected</span><span class='value'>{connected}</span></div><div class='status-pill'><span class='label'>Customers</span><span class='value'>{len(customers)}</span></div></div>",
+            unsafe_allow_html=True,
+        )
+        st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
+        st.caption("Use this view to spot where attention is needed first.")
+        st.markdown("</div>", unsafe_allow_html=True)
+    with glance_mid:
+        st.markdown("<div class='section-card'>", unsafe_allow_html=True)
+        st.markdown("#### Largest Active Opportunity")
+        if top_prospect:
+            st.markdown(f"**{top_prospect.get('company_name', '')}**")
+            st.caption(f"{top_prospect.get('product_interest', 'No product')} | AED {float(top_prospect.get('estimated_value', 0) or 0):,.0f}")
+            st.caption(f"Stage: {top_prospect.get('status', 'Unknown')} | Next: {top_prospect.get('next_action', 'Not set') or 'Not set'}")
+        else:
+            st.markdown("<div class='empty-state'>Add a prospect to surface the highest-value opportunity here.</div>", unsafe_allow_html=True)
+        st.markdown("</div>", unsafe_allow_html=True)
+    with glance_right:
+        st.markdown("<div class='section-card'>", unsafe_allow_html=True)
+        st.markdown("#### Latest Quotation")
+        if latest_quote:
+            st.markdown(f"**{latest_quote.get('customer_name', '')}**")
+            st.caption(f"{latest_quote.get('product_name', '')} | {latest_quote.get('currency', 'AED')} {float(latest_quote.get('quote_value', 0) or 0):,.0f}")
+            st.caption(f"Status: {latest_quote.get('status', 'Draft')} | Valid until: {latest_quote.get('valid_until', 'Not set')}")
+        else:
+            st.markdown("<div class='empty-state'>No quotations yet. Create one to make the dashboard more useful.</div>", unsafe_allow_html=True)
+        st.markdown("</div>", unsafe_allow_html=True)
 
     left, right = st.columns([1.25, 1])
 
     with left:
+        st.markdown("<div class='section-card'>", unsafe_allow_html=True)
         st.subheader("Pipeline by Status")
-        status_counts = (
-            pd.DataFrame(prospects)["status"].value_counts().reindex(STATUSES, fill_value=0)
-            if prospects
-            else pd.Series([0] * len(STATUSES), index=STATUSES)
-        )
-        st.bar_chart(status_counts)
+        st.bar_chart(top_status_df)
+        st.markdown("<div class='status-strip'>" + "".join(
+            f"<div class='status-pill'><span class='label'>{status}</span><span class='value'>{int(top_status_df.get(status, 0))}</span></div>"
+            for status in STATUSES
+        ) + "</div>", unsafe_allow_html=True)
+        st.markdown("</div>", unsafe_allow_html=True)
 
     with right:
-        st.subheader("Recent Quotations")
-        if quotations:
-            recent = pd.DataFrame(quotations).sort_values("created_date", ascending=False).head(8)
-            st.dataframe(
-                recent[["id", "customer_name", "product_name", "quote_value", "status", "valid_until"]],
-                width="stretch",
-                hide_index=True,
-            )
+        st.markdown("<div class='section-card'>", unsafe_allow_html=True)
+        st.subheader("Recent Activity")
+        if latest_activity:
+            for item in latest_activity:
+                st.markdown(
+                    f"""
+                    <div class='timeline-item'>
+                        <strong>{item.get('activity_type', 'Activity')}</strong><br/>
+                        <div>{item.get('company_name', '')}</div>
+                        <div class='timeline-meta'>{item.get('details', '')} · {item.get('activity_date', '')}</div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
         else:
-            st.info("No quotations yet.")
+            st.markdown("<div class='empty-state'>No activity yet. Customer edits, prospect updates, and quotation creation will show up here.</div>", unsafe_allow_html=True)
+        st.markdown("</div>", unsafe_allow_html=True)
 
-    st.subheader("Upcoming Actions")
+    st.markdown("### Upcoming Actions")
     action_df = pd.DataFrame(prospects)
     if not action_df.empty:
         action_df = action_df[action_df["status"].isin(["Contacted", "Qualified", "Proposal Sent", "Negotiation"])]
         action_df = action_df[["company_name", "contact_name", "status", "next_action", "expected_close_date"]]
         st.dataframe(action_df, width="stretch", hide_index=True)
     else:
-        st.info("Add prospects to see your task queue.")
+        st.markdown("<div class='empty-state'>Add prospects to surface follow-ups, proposals, and close dates here.</div>", unsafe_allow_html=True)
 
 
 def customers_view(data: dict[str, list[dict[str, Any]]]) -> None:
