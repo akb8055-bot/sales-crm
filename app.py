@@ -1329,7 +1329,7 @@ def insights_view(data: dict[str, list[dict[str, Any]]]) -> None:
         st.info("Quotations required for quote insights.")
 
 
-def render_period_report(data: dict[str, Any], start: date, end: date, label: str) -> None:
+def render_period_report(data: dict[str, Any], start: date, end: date, label: str, combined_view: bool = False) -> None:
     prospects = data["prospects"]
     quotations = data["quotations"]
     activities = data.get("activity_log", [])
@@ -1414,7 +1414,7 @@ def render_period_report(data: dict[str, Any], start: date, end: date, label: st
         f"""
         <div class='report-hero'>
             <h3>{label.title()} Sales Performance Report</h3>
-            <p>{start} to {end}. A concise executive view of connected leads, proposals issued, tracked activity, and won business value.</p>
+            <p>Date frame: {start} to {end}. A concise executive view of connected leads, proposals issued, tracked activity, and won business value.</p>
         </div>
         """,
         unsafe_allow_html=True,
@@ -1448,110 +1448,187 @@ def render_period_report(data: dict[str, Any], start: date, end: date, label: st
         unsafe_allow_html=True,
     )
 
-    st.markdown("<div class='report-section'>", unsafe_allow_html=True)
-    st.markdown("#### Executive Summary")
     summary_text = (
         f"In this {label} period, {len(connected)} leads were connected, {len(proposals)} proposals were shared, "
         f"and total quoted value reached AED {proposal_total:,.0f}. "
         f"There were {len(prospect_updates)} prospect updates and {len(activities_in_period)} tracked activities. "
         f"Won project value stands at AED {won_total:,.0f}."
     )
+
+    st.markdown("<div class='report-section'>", unsafe_allow_html=True)
+    st.markdown("#### Executive Summary")
     st.markdown(f"<div class='report-note'>{summary_text}</div>", unsafe_allow_html=True)
     st.altair_chart(report_trend_chart, use_container_width=True)
-    st.markdown("</div>", unsafe_allow_html=True)
 
-    st.markdown("<div class='report-section'>", unsafe_allow_html=True)
-    st.markdown("#### Leads Connected")
-    if connected_df.empty:
-        st.info("No connected leads in this period.")
-    else:
-        connected_view = connected_df[
-            ["id", "company_name", "contact_name", "status", "connected_at", "next_action", "estimated_value"]
-        ]
-        st.dataframe(connected_view, width="stretch", hide_index=True)
-        st.download_button(
-            "Download Connected Leads CSV",
-            data=csv_bytes(connected_view),
-            file_name=f"connected_leads_{label.lower()}.csv",
-            mime="text/csv",
-        )
-    st.markdown("</div>", unsafe_allow_html=True)
+    if combined_view:
+        left_col, right_col = st.columns(2)
 
-    st.markdown("<div class='report-section'>", unsafe_allow_html=True)
-    st.markdown("#### Proposals Shared")
-    if proposals_df.empty:
-        st.info("No proposals shared in this period.")
-    else:
-        proposal_view = proposals_df[
-            ["id", "prospect_id", "customer_name", "product_name", "quote_value", "status", "created_date"]
-        ]
-        st.dataframe(proposal_view, width="stretch", hide_index=True)
-        st.download_button(
-            "Download Proposals CSV",
-            data=csv_bytes(proposal_view),
-            file_name=f"proposals_{label.lower()}.csv",
-            mime="text/csv",
-        )
-    st.markdown("</div>", unsafe_allow_html=True)
+        with left_col:
+            st.markdown("##### Leads Connected")
+            if connected_df.empty:
+                st.info("No connected leads in this period.")
+            else:
+                connected_view = connected_df[
+                    ["id", "company_name", "contact_name", "status", "connected_at", "next_action", "estimated_value"]
+                ]
+                st.dataframe(connected_view, width="stretch", hide_index=True)
+                st.download_button(
+                    "Download Connected Leads CSV",
+                    data=csv_bytes(connected_view),
+                    file_name=f"connected_leads_{label.lower()}.csv",
+                    mime="text/csv",
+                )
 
-    st.markdown("<div class='report-section'>", unsafe_allow_html=True)
-    st.markdown("#### Next Steps for Proposal Leads")
-    if next_steps_df.empty:
-        st.info("No next-step records available for proposals in this period.")
-    else:
-        st.dataframe(next_steps_df, width="stretch", hide_index=True)
-        st.download_button(
-            "Download Next Steps CSV",
-            data=csv_bytes(next_steps_df),
-            file_name=f"proposal_next_steps_{label.lower()}.csv",
-            mime="text/csv",
-        )
-    st.markdown("</div>", unsafe_allow_html=True)
+            st.markdown("##### Next Steps for Proposal Leads")
+            if next_steps_df.empty:
+                st.info("No next-step records available for proposals in this period.")
+            else:
+                st.dataframe(next_steps_df, width="stretch", hide_index=True)
+                st.download_button(
+                    "Download Next Steps CSV",
+                    data=csv_bytes(next_steps_df),
+                    file_name=f"proposal_next_steps_{label.lower()}.csv",
+                    mime="text/csv",
+                )
 
-    st.markdown("<div class='report-section'>", unsafe_allow_html=True)
-    st.markdown("#### Latest Prospect Updates")
-    if updates_df.empty:
-        st.info("No prospect updates in this period.")
-    else:
-        updates_view = updates_df[["id", "company_name", "status", "updated_at", "next_action", "notes"]]
-        st.dataframe(updates_view, width="stretch", hide_index=True)
-        st.download_button(
-            "Download Prospect Updates CSV",
-            data=csv_bytes(updates_view),
-            file_name=f"prospect_updates_{label.lower()}.csv",
-            mime="text/csv",
-        )
-    st.markdown("</div>", unsafe_allow_html=True)
+            st.markdown("##### Activities Completed")
+            if activities_df.empty:
+                st.info("No tracked activities in this period.")
+            else:
+                activities_view = activities_df[
+                    ["activity_id", "activity_type", "company_name", "details", "product_name", "amount", "activity_date", "status"]
+                ]
+                st.dataframe(activities_view, width="stretch", hide_index=True)
+                st.download_button(
+                    "Download Activities CSV",
+                    data=csv_bytes(activities_view),
+                    file_name=f"activities_{label.lower()}.csv",
+                    mime="text/csv",
+                )
 
-    st.markdown("<div class='report-section'>", unsafe_allow_html=True)
-    st.markdown("#### Activities Completed")
-    if activities_df.empty:
-        st.info("No tracked activities in this period.")
-    else:
-        activities_view = activities_df[
-            ["activity_id", "activity_type", "company_name", "details", "product_name", "amount", "activity_date", "status"]
-        ]
-        st.dataframe(activities_view, width="stretch", hide_index=True)
-        st.download_button(
-            "Download Activities CSV",
-            data=csv_bytes(activities_view),
-            file_name=f"activities_{label.lower()}.csv",
-            mime="text/csv",
-        )
-    st.markdown("</div>", unsafe_allow_html=True)
+        with right_col:
+            st.markdown("##### Proposals Shared")
+            if proposals_df.empty:
+                st.info("No proposals shared in this period.")
+            else:
+                proposal_view = proposals_df[
+                    ["id", "prospect_id", "customer_name", "product_name", "quote_value", "status", "created_date"]
+                ]
+                st.dataframe(proposal_view, width="stretch", hide_index=True)
+                st.download_button(
+                    "Download Proposals CSV",
+                    data=csv_bytes(proposal_view),
+                    file_name=f"proposals_{label.lower()}.csv",
+                    mime="text/csv",
+                )
 
-    st.markdown("<div class='report-section'>", unsafe_allow_html=True)
-    st.markdown("#### Won Projects and Commercial Details")
-    if won_detail_df.empty:
-        st.info("No projects marked as Won in this period.")
+            st.markdown("##### Latest Prospect Updates")
+            if updates_df.empty:
+                st.info("No prospect updates in this period.")
+            else:
+                updates_view = updates_df[["id", "company_name", "status", "updated_at", "next_action", "notes"]]
+                st.dataframe(updates_view, width="stretch", hide_index=True)
+                st.download_button(
+                    "Download Prospect Updates CSV",
+                    data=csv_bytes(updates_view),
+                    file_name=f"prospect_updates_{label.lower()}.csv",
+                    mime="text/csv",
+                )
+
+            st.markdown("##### Won Projects and Commercial Details")
+            if won_detail_df.empty:
+                st.info("No projects marked as Won in this period.")
+            else:
+                st.dataframe(won_detail_df, width="stretch", hide_index=True)
+                st.download_button(
+                    "Download Won Projects CSV",
+                    data=csv_bytes(won_detail_df),
+                    file_name=f"won_projects_{label.lower()}.csv",
+                    mime="text/csv",
+                )
     else:
-        st.dataframe(won_detail_df, width="stretch", hide_index=True)
-        st.download_button(
-            "Download Won Projects CSV",
-            data=csv_bytes(won_detail_df),
-            file_name=f"won_projects_{label.lower()}.csv",
-            mime="text/csv",
-        )
+        st.markdown("##### Leads Connected")
+        if connected_df.empty:
+            st.info("No connected leads in this period.")
+        else:
+            connected_view = connected_df[
+                ["id", "company_name", "contact_name", "status", "connected_at", "next_action", "estimated_value"]
+            ]
+            st.dataframe(connected_view, width="stretch", hide_index=True)
+            st.download_button(
+                "Download Connected Leads CSV",
+                data=csv_bytes(connected_view),
+                file_name=f"connected_leads_{label.lower()}.csv",
+                mime="text/csv",
+            )
+
+        st.markdown("##### Proposals Shared")
+        if proposals_df.empty:
+            st.info("No proposals shared in this period.")
+        else:
+            proposal_view = proposals_df[
+                ["id", "prospect_id", "customer_name", "product_name", "quote_value", "status", "created_date"]
+            ]
+            st.dataframe(proposal_view, width="stretch", hide_index=True)
+            st.download_button(
+                "Download Proposals CSV",
+                data=csv_bytes(proposal_view),
+                file_name=f"proposals_{label.lower()}.csv",
+                mime="text/csv",
+            )
+
+        st.markdown("##### Next Steps for Proposal Leads")
+        if next_steps_df.empty:
+            st.info("No next-step records available for proposals in this period.")
+        else:
+            st.dataframe(next_steps_df, width="stretch", hide_index=True)
+            st.download_button(
+                "Download Next Steps CSV",
+                data=csv_bytes(next_steps_df),
+                file_name=f"proposal_next_steps_{label.lower()}.csv",
+                mime="text/csv",
+            )
+
+        st.markdown("##### Latest Prospect Updates")
+        if updates_df.empty:
+            st.info("No prospect updates in this period.")
+        else:
+            updates_view = updates_df[["id", "company_name", "status", "updated_at", "next_action", "notes"]]
+            st.dataframe(updates_view, width="stretch", hide_index=True)
+            st.download_button(
+                "Download Prospect Updates CSV",
+                data=csv_bytes(updates_view),
+                file_name=f"prospect_updates_{label.lower()}.csv",
+                mime="text/csv",
+            )
+
+        st.markdown("##### Activities Completed")
+        if activities_df.empty:
+            st.info("No tracked activities in this period.")
+        else:
+            activities_view = activities_df[
+                ["activity_id", "activity_type", "company_name", "details", "product_name", "amount", "activity_date", "status"]
+            ]
+            st.dataframe(activities_view, width="stretch", hide_index=True)
+            st.download_button(
+                "Download Activities CSV",
+                data=csv_bytes(activities_view),
+                file_name=f"activities_{label.lower()}.csv",
+                mime="text/csv",
+            )
+
+        st.markdown("##### Won Projects and Commercial Details")
+        if won_detail_df.empty:
+            st.info("No projects marked as Won in this period.")
+        else:
+            st.dataframe(won_detail_df, width="stretch", hide_index=True)
+            st.download_button(
+                "Download Won Projects CSV",
+                data=csv_bytes(won_detail_df),
+                file_name=f"won_projects_{label.lower()}.csv",
+                mime="text/csv",
+            )
+
     st.markdown("</div>", unsafe_allow_html=True)
 
 
@@ -1719,7 +1796,7 @@ def reports_view(data: dict[str, Any]) -> None:
 
     with mtab:
         st.write(f"Period: {month_start} to {month_end}")
-        render_period_report(data, month_start, month_end, "monthly")
+        render_period_report(data, month_start, month_end, "monthly", combined_view=True)
         monthly_connected, monthly_proposals, monthly_next_steps, monthly_activities, monthly_won = period_frames(data, month_start, month_end)
         st.caption("Click to save monthly report files directly to your local Downloads/crm_reports folder (local run only).")
         if st.button("Save Monthly Report Files to Downloads", width="stretch"):
