@@ -464,8 +464,8 @@ def dashboard(data: dict[str, list[dict[str, Any]]]) -> None:
     st.markdown(
         """
         <div class='hero'>
-            <h2 style='margin:0;'>Custom Sales CRM</h2>
-            <p>Track customers, prospects, quotation values, and product opportunities in one place.</p>
+            <h2 style='margin:0;'>Metalys Enclosures Manufacturing</h2>
+            <p>Sales CRM</p>
         </div>
         """,
         unsafe_allow_html=True,
