@@ -1654,6 +1654,24 @@ def save_report_bundle_to_downloads(
     return [connected_path, proposals_path, next_steps_path, activities_path, won_path]
 
 
+def save_report_bundle_and_refresh(
+    label: str,
+    connected_df: pd.DataFrame,
+    proposals_df: pd.DataFrame,
+    next_steps_df: pd.DataFrame,
+    activities_df: pd.DataFrame,
+    won_df: pd.DataFrame,
+) -> list[Path]:
+    return save_report_bundle_to_downloads(
+        label,
+        connected_df,
+        proposals_df,
+        next_steps_df,
+        activities_df,
+        won_df,
+    )
+
+
 def period_frames(data: dict[str, Any], start: date, end: date) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     prospects = data["prospects"]
     quotations = data["quotations"]
@@ -1775,14 +1793,7 @@ def reports_view(data: dict[str, Any]) -> None:
         st.caption("Click to save weekly report files directly to your local Downloads/crm_reports folder (local run only).")
         if st.button("Save Weekly Report Files to Downloads", width="stretch"):
             try:
-                files = save_report_bundle_to_downloads(
-                    "weekly",
-                    weekly_connected,
-                    weekly_proposals,
-                    weekly_next_steps,
-                    weekly_activities,
-                    weekly_won,
-                )
+                files = save_report_bundle_and_refresh("weekly", weekly_connected, weekly_proposals, weekly_next_steps, weekly_activities, weekly_won)
                 st.success("Saved weekly report files:")
                 for path in files:
                     st.write(str(path))
@@ -1796,14 +1807,7 @@ def reports_view(data: dict[str, Any]) -> None:
         st.caption("Click to save monthly report files directly to your local Downloads/crm_reports folder (local run only).")
         if st.button("Save Monthly Report Files to Downloads", width="stretch"):
             try:
-                files = save_report_bundle_to_downloads(
-                    "monthly",
-                    monthly_connected,
-                    monthly_proposals,
-                    monthly_next_steps,
-                    monthly_activities,
-                    monthly_won,
-                )
+                files = save_report_bundle_and_refresh("monthly", monthly_connected, monthly_proposals, monthly_next_steps, monthly_activities, monthly_won)
                 st.success("Saved monthly report files:")
                 for path in files:
                     st.write(str(path))
