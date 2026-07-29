@@ -9,6 +9,7 @@ from typing import Any
 import altair as alt
 import pandas as pd
 import streamlit as st
+import streamlit.components.v1 as components
 
 st.set_page_config(page_title="Custom Sales CRM", page_icon="📈", layout="wide")
 
@@ -432,6 +433,11 @@ def save_data(data: dict[str, list[dict[str, Any]]]) -> None:
         json.dump(data, f, indent=2)
 
 
+def save_data_and_refresh(data: dict[str, Any]) -> None:
+    save_data(data)
+    st.rerun()
+
+
 def next_id(prefix: str, existing_ids: list[str]) -> str:
     nums = []
     for item_id in existing_ids:
@@ -659,7 +665,7 @@ def render_attachment_manager(
                     status=quote_status,
                 )
 
-            save_data(data)
+            save_data_and_refresh(data)
             if track_quote_value:
                 st.success(
                     f"Uploaded {len(uploaded_files)} PDF file(s) for {upload_label} and recorded AED {float(quote_value or 0):,.0f} as quotation value."
@@ -700,9 +706,7 @@ def render_attachment_manager(
                         company_name=entity_name,
                         details=f"Deleted file {fobj.get('file_name', 'quotation_file.pdf')}",
                     )
-                    save_data(data)
-                    st.success("File deleted.")
-                    st.rerun()
+                    save_data_and_refresh(data)
     else:
         st.caption("No quotation PDFs uploaded for this prospect yet.")
 
@@ -880,15 +884,14 @@ def customers_view(data: dict[str, list[dict[str, Any]]]) -> None:
     customers = sanitize_customers(data["customers"])
     if len(customers) != len(data["customers"]):
         data["customers"] = customers
-        save_data(data)
+        save_data_and_refresh(data)
 
     if customers:
         customer_df = pd.DataFrame(customers)
         edited = st.data_editor(customer_df, width="stretch", hide_index=True, num_rows="dynamic")
         if st.button("Save Customer Edits", width="stretch"):
             data["customers"] = sanitize_customers(edited.fillna("").to_dict("records"))
-            save_data(data)
-            st.success("Customer records updated.")
+            save_data_and_refresh(data)
 
         st.markdown("### Delete Customer")
         delete_options = {f"{c.get('id', '')} | {c.get('company_name', '')}": c for c in customers}
@@ -907,9 +910,7 @@ def customers_view(data: dict[str, list[dict[str, Any]]]) -> None:
                 company_name=company_name,
                 details="Customer record deleted",
             )
-            save_data(data)
-            st.success(f"Deleted customer {company_name}.")
-            st.rerun()
+            save_data_and_refresh(data)
     else:
         st.info("No customers yet. Add your first account below.")
 
@@ -962,8 +963,7 @@ def customers_view(data: dict[str, list[dict[str, Any]]]) -> None:
                         company_name=company,
                         details="New customer account created",
                     )
-                    save_data(data)
-                    st.success(f"Customer {company} added.")
+                    save_data_and_refresh(data)
 
     st.markdown("### Upload Customer Quotation PDFs")
     st.caption("Attach quotation PDFs directly to customer accounts.")
@@ -1070,8 +1070,7 @@ def prospects_view(data: dict[str, list[dict[str, Any]]]) -> None:
                             company_name=company,
                             details=f"Stage updated to {status}; next action: {next_action or 'Not set'}",
                         )
-                        save_data(data)
-                        st.success("Prospect updated.")
+                        save_data_and_refresh(data)
         else:
             st.info("Select a prospect from the dropdown to open the edit form.")
 
@@ -1143,8 +1142,7 @@ def prospects_view(data: dict[str, list[dict[str, Any]]]) -> None:
                         company_name=company,
                         details=f"New prospect created at stage {status}",
                     )
-                    save_data(data)
-                    st.success(f"Prospect {company} added.")
+                    save_data_and_refresh(data)
 
 
 def quotations_view(data: dict[str, list[dict[str, Any]]]) -> None:
@@ -1161,8 +1159,7 @@ def quotations_view(data: dict[str, list[dict[str, Any]]]) -> None:
             if "quote_value" in edited_quotes.columns:
                 edited_quotes["quote_value"] = pd.to_numeric(edited_quotes["quote_value"], errors="coerce").fillna(0.0)
             data["quotations"] = edited_quotes.fillna("").to_dict("records")
-            save_data(data)
-            st.success("Quotation records updated.")
+            save_data_and_refresh(data)
     else:
         st.info("No quotations created yet.")
 
@@ -1223,8 +1220,7 @@ def quotations_view(data: dict[str, list[dict[str, Any]]]) -> None:
                         status=quote_status,
                     )
 
-                    save_data(data)
-                    st.success(f"Quotation created for {selected_lead['company_name']}.")
+                    save_data_and_refresh(data)
 
     st.markdown("### Upload Existing Quotation PDFs")
     st.caption("Use this when you already generated quotation PDFs and want to attach them to a lead.")
@@ -1276,8 +1272,7 @@ def pipeline_view(data: dict[str, list[dict[str, Any]]]) -> None:
                     status=new_stage,
                 )
                 break
-        save_data(data)
-        st.success(f"{selected_lead['company_name']} moved to {new_stage}.")
+        save_data_and_refresh(data)
 
     cols = st.columns(len(STATUSES))
     for idx, status in enumerate(STATUSES):
@@ -1822,6 +1817,11 @@ def main() -> None:
     if ensure_schema(data):
         save_data(data)
 
+    components.html(
+        "<script>setTimeout(() => window.location.reload(), 30000);</script>",
+        height=0,
+    )
+
     with st.sidebar:
         st.title("Sales Workspace")
         section = st.radio(
@@ -1831,8 +1831,7 @@ def main() -> None:
         )
         st.markdown("---")
         if st.button("Reset to Sample Data", width="stretch"):
-            save_data(SAMPLE_DATA)
-            st.success("Sample CRM data restored.")
+            save_data_and_refresh(SAMPLE_DATA)
 
     if section == "Dashboard":
         dashboard(data)
