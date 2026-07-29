@@ -323,7 +323,7 @@ def render_attachment_manager(data: dict[str, Any], prospects: list[dict[str, An
         key=f"{key_prefix}_file_uploader",
     )
 
-    if st.button("Save Uploaded PDF Files", use_container_width=True, key=f"{key_prefix}_save_upload_btn"):
+    if st.button("Save Uploaded PDF Files", width="stretch", key=f"{key_prefix}_save_upload_btn"):
         if not uploaded_files:
             st.warning("Please choose one or more PDF files first.")
         else:
@@ -355,13 +355,13 @@ def render_attachment_manager(data: dict[str, Any], prospects: list[dict[str, An
                     file_name=fobj.get("file_name", "quotation_file.pdf"),
                     mime=fobj.get("mime_type", "application/pdf"),
                     key=f"{key_prefix}_download_{upload_prospect_id}_{idx}",
-                    use_container_width=True,
+                    width="stretch",
                 )
             with d2:
                 if st.button(
                     "Delete",
                     key=f"{key_prefix}_delete_{upload_prospect_id}_{idx}",
-                    use_container_width=True,
+                    width="stretch",
                 ):
                     files.pop(idx)
                     if not files:
@@ -418,7 +418,7 @@ def dashboard(data: dict[str, list[dict[str, Any]]]) -> None:
             recent = pd.DataFrame(quotations).sort_values("created_date", ascending=False).head(8)
             st.dataframe(
                 recent[["id", "customer_name", "product_name", "quote_value", "status", "valid_until"]],
-                use_container_width=True,
+                width="stretch",
                 hide_index=True,
             )
         else:
@@ -429,7 +429,7 @@ def dashboard(data: dict[str, list[dict[str, Any]]]) -> None:
     if not action_df.empty:
         action_df = action_df[action_df["status"].isin(["Contacted", "Qualified", "Proposal Sent", "Negotiation"])]
         action_df = action_df[["company_name", "contact_name", "status", "next_action", "expected_close_date"]]
-        st.dataframe(action_df, use_container_width=True, hide_index=True)
+        st.dataframe(action_df, width="stretch", hide_index=True)
     else:
         st.info("Add prospects to see your task queue.")
 
@@ -440,8 +440,8 @@ def customers_view(data: dict[str, list[dict[str, Any]]]) -> None:
 
     if customers:
         customer_df = pd.DataFrame(customers)
-        edited = st.data_editor(customer_df, use_container_width=True, hide_index=True, num_rows="dynamic")
-        if st.button("Save Customer Edits", use_container_width=True):
+        edited = st.data_editor(customer_df, width="stretch", hide_index=True, num_rows="dynamic")
+        if st.button("Save Customer Edits", width="stretch"):
             data["customers"] = edited.fillna("").to_dict("records")
             save_data(data)
             st.success("Customer records updated.")
@@ -467,7 +467,7 @@ def customers_view(data: dict[str, list[dict[str, Any]]]) -> None:
 
             annual_revenue = st.number_input("Annual Revenue (AED)", min_value=0.0, step=1000.0)
             notes = st.text_area("Notes")
-            submitted = st.form_submit_button("Create Customer", use_container_width=True)
+            submitted = st.form_submit_button("Create Customer", width="stretch")
 
             if submitted:
                 if not company or not contact:
@@ -510,7 +510,7 @@ def prospects_view(data: dict[str, list[dict[str, Any]]]) -> None:
             rows.append(row)
 
         p_df = pd.DataFrame(rows)
-        st.dataframe(p_df, use_container_width=True, hide_index=True)
+        st.dataframe(p_df, width="stretch", hide_index=True)
     else:
         st.info("No prospects yet. Add leads and opportunities below.")
 
@@ -553,7 +553,7 @@ def prospects_view(data: dict[str, list[dict[str, Any]]]) -> None:
                 next_action = s2.text_input("Next Action", value=selected.get("next_action", ""))
                 notes = st.text_area("Notes", value=selected.get("notes", ""))
 
-                submitted_edit = st.form_submit_button("Save Prospect Changes", use_container_width=True)
+                submitted_edit = st.form_submit_button("Save Prospect Changes", width="stretch")
                 if submitted_edit:
                     if not company or not contact:
                         st.error("Company name and contact are required.")
@@ -606,7 +606,7 @@ def prospects_view(data: dict[str, list[dict[str, Any]]]) -> None:
             next_action = s2.text_input("Next Action")
 
             notes = st.text_area("Notes")
-            submitted = st.form_submit_button("Create Prospect", use_container_width=True)
+            submitted = st.form_submit_button("Create Prospect", width="stretch")
 
             if submitted:
                 if not company or not contact:
@@ -645,8 +645,8 @@ def quotations_view(data: dict[str, list[dict[str, Any]]]) -> None:
         q_df = pd.DataFrame(quotes)
         if "quote_value" in q_df.columns:
             q_df["quote_value"] = pd.to_numeric(q_df["quote_value"], errors="coerce").fillna(0.0)
-        edited_quotes = st.data_editor(q_df, use_container_width=True, hide_index=True, num_rows="dynamic")
-        if st.button("Save Quotation Edits", use_container_width=True):
+        edited_quotes = st.data_editor(q_df, width="stretch", hide_index=True, num_rows="dynamic")
+        if st.button("Save Quotation Edits", width="stretch"):
             if "quote_value" in edited_quotes.columns:
                 edited_quotes["quote_value"] = pd.to_numeric(edited_quotes["quote_value"], errors="coerce").fillna(0.0)
             data["quotations"] = edited_quotes.fillna("").to_dict("records")
@@ -671,7 +671,7 @@ def quotations_view(data: dict[str, list[dict[str, Any]]]) -> None:
             valid_until = d2.date_input("Valid Until", value=date.today())
 
             notes = st.text_area("Commercial Notes")
-            submitted = st.form_submit_button("Create Quotation", use_container_width=True)
+            submitted = st.form_submit_button("Create Quotation", width="stretch")
 
             if submitted:
                 if not selected_lead:
@@ -727,7 +727,7 @@ def pipeline_view(data: dict[str, list[dict[str, Any]]]) -> None:
     with quick_col2:
         new_stage = st.selectbox("New Stage", STATUSES, index=STATUSES.index(selected_lead["status"]))
 
-    if st.button("Update Stage", use_container_width=True):
+    if st.button("Update Stage", width="stretch"):
         for p in data["prospects"]:
             if p["id"] == selected_lead["id"]:
                 p["status"] = new_stage
@@ -830,7 +830,7 @@ def render_period_report(data: dict[str, Any], start: date, end: date, label: st
         connected_view = connected_df[
             ["id", "company_name", "contact_name", "status", "connected_at", "next_action", "estimated_value"]
         ]
-        st.dataframe(connected_view, use_container_width=True, hide_index=True)
+        st.dataframe(connected_view, width="stretch", hide_index=True)
         st.download_button(
             "Download Connected Leads CSV",
             data=csv_bytes(connected_view),
@@ -845,7 +845,7 @@ def render_period_report(data: dict[str, Any], start: date, end: date, label: st
         proposal_view = proposals_df[
             ["id", "prospect_id", "customer_name", "product_name", "quote_value", "status", "created_date"]
         ]
-        st.dataframe(proposal_view, use_container_width=True, hide_index=True)
+        st.dataframe(proposal_view, width="stretch", hide_index=True)
         st.download_button(
             "Download Proposals CSV",
             data=csv_bytes(proposal_view),
@@ -857,7 +857,7 @@ def render_period_report(data: dict[str, Any], start: date, end: date, label: st
     if next_steps_df.empty:
         st.info("No next-step records available for proposals in this period.")
     else:
-        st.dataframe(next_steps_df, use_container_width=True, hide_index=True)
+        st.dataframe(next_steps_df, width="stretch", hide_index=True)
         st.download_button(
             "Download Next Steps CSV",
             data=csv_bytes(next_steps_df),
@@ -961,7 +961,7 @@ def reports_view(data: dict[str, Any]) -> None:
         render_period_report(data, active_week_start, active_week_end, "weekly")
         weekly_connected, weekly_proposals, weekly_next_steps = period_frames(data, active_week_start, active_week_end)
         st.caption("Click to save weekly report files directly to your local Downloads/crm_reports folder (local run only).")
-        if st.button("Save Weekly Report Files to Downloads", use_container_width=True):
+        if st.button("Save Weekly Report Files to Downloads", width="stretch"):
             try:
                 files = save_report_bundle_to_downloads("weekly", weekly_connected, weekly_proposals, weekly_next_steps)
                 st.success("Saved weekly report files:")
@@ -975,7 +975,7 @@ def reports_view(data: dict[str, Any]) -> None:
         render_period_report(data, month_start, month_end, "monthly")
         monthly_connected, monthly_proposals, monthly_next_steps = period_frames(data, month_start, month_end)
         st.caption("Click to save monthly report files directly to your local Downloads/crm_reports folder (local run only).")
-        if st.button("Save Monthly Report Files to Downloads", use_container_width=True):
+        if st.button("Save Monthly Report Files to Downloads", width="stretch"):
             try:
                 files = save_report_bundle_to_downloads("monthly", monthly_connected, monthly_proposals, monthly_next_steps)
                 st.success("Saved monthly report files:")
@@ -999,7 +999,7 @@ def main() -> None:
             label_visibility="collapsed",
         )
         st.markdown("---")
-        if st.button("Reset to Sample Data", use_container_width=True):
+        if st.button("Reset to Sample Data", width="stretch"):
             save_data(SAMPLE_DATA)
             st.success("Sample CRM data restored.")
 
