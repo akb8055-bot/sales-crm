@@ -162,6 +162,11 @@ def ensure_schema(data: dict[str, Any]) -> bool:
         data["activity_log"] = []
         changed = True
 
+    cleaned_customers = sanitize_customers(data["customers"])
+    if len(cleaned_customers) != len(data["customers"]):
+        data["customers"] = cleaned_customers
+        changed = True
+
     for prospect in data["prospects"]:
         normalized_estimated = pd.to_numeric(pd.Series([prospect.get("estimated_value", 0)]), errors="coerce").fillna(0.0).iloc[0]
         if prospect.get("estimated_value") != float(normalized_estimated):
@@ -232,6 +237,22 @@ def csv_bytes(df: pd.DataFrame) -> bytes:
     if df.empty:
         return b""
     return df.to_csv(index=False).encode("utf-8")
+
+
+def is_blank_customer(customer: dict[str, Any]) -> bool:
+    keys = ["company_name", "contact_name", "email", "phone", "industry", "city", "country"]
+    return all(str(customer.get(k, "")).strip() == "" for k in keys)
+
+
+def sanitize_customers(customers: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    cleaned: list[dict[str, Any]] = []
+    for customer in customers:
+        if not isinstance(customer, dict):
+            continue
+        if is_blank_customer(customer):
+            continue
+        cleaned.append(customer)
+    return cleaned
 
 
 def log_activity(
@@ -362,7 +383,7 @@ def render_attachment_manager(
 
 
 def dashboard(data: dict[str, list[dict[str, Any]]]) -> None:
-    customers = data["customers"]
+    customers = sanitize_customers(data["customers"])
     prospects = data["prospects"]
     quotations = data["quotations"]
 
@@ -424,15 +445,39 @@ def dashboard(data: dict[str, list[dict[str, Any]]]) -> None:
 
 def customers_view(data: dict[str, list[dict[str, Any]]]) -> None:
     st.subheader("Customer Directory")
-    customers = data["customers"]
+    customers = sanitize_customers(data["customers"])
+    if len(customers) != len(data["customers"]):
+        data["customers"] = customers
+        save_data(data)
 
     if customers:
         customer_df = pd.DataFrame(customers)
         edited = st.data_editor(customer_df, width="stretch", hide_index=True, num_rows="dynamic")
         if st.button("Save Customer Edits", width="stretch"):
-            data["customers"] = edited.fillna("").to_dict("records")
+            data["customers"] = sanitize_customers(edited.fillna("").to_dict("records"))
             save_data(data)
             st.success("Customer records updated.")
+
+        st.markdown("### Delete Customer")
+        delete_options = {f"{c.get('id', '')} | {c.get('company_name', '')}": c for c in customers}
+        selected_label = st.selectbox("Select customer to delete", list(delete_options.keys()))
+        selected_customer = delete_options[selected_label]
+        if st.button("Delete Selected Customer", width="stretch"):
+            customer_id = selected_customer.get("id", "")
+            company_name = selected_customer.get("company_name", "")
+            data["customers"] = [c for c in data["customers"] if c.get("id") != customer_id]
+            data.get("customer_attachments", {}).pop(customer_id, None)
+            log_activity(
+                data,
+                activity_type="Customer Deleted",
+                entity_type="customer",
+                entity_id=customer_id,
+                company_name=company_name,
+                details="Customer record deleted",
+            )
+            save_data(data)
+            st.success(f"Deleted customer {company_name}.")
+            st.rerun()
     else:
         st.info("No customers yet. Add your first account below.")
 
