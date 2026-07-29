@@ -231,11 +231,22 @@ def ensure_schema(data: dict[str, Any]) -> bool:
         changed = True
 
     for prospect in data["prospects"]:
+        normalized_estimated = pd.to_numeric(pd.Series([prospect.get("estimated_value", 0)]), errors="coerce").fillna(0.0).iloc[0]
+        if prospect.get("estimated_value") != float(normalized_estimated):
+            prospect["estimated_value"] = float(normalized_estimated)
+            changed = True
+
         if "connected_at" not in prospect:
             if prospect.get("status") in CONNECTED_STATUSES:
                 prospect["connected_at"] = prospect.get("updated_at", today_iso())[:10]
             else:
                 prospect["connected_at"] = ""
+            changed = True
+
+    for quote in data["quotations"]:
+        normalized_quote = pd.to_numeric(pd.Series([quote.get("quote_value", 0)]), errors="coerce").fillna(0.0).iloc[0]
+        if quote.get("quote_value") != float(normalized_quote):
+            quote["quote_value"] = float(normalized_quote)
             changed = True
 
     return changed
@@ -494,7 +505,7 @@ def prospects_view(data: dict[str, list[dict[str, Any]]]) -> None:
             q = quotes_by_prospect.get(prospect["id"])
             row["quote_generated"] = "Yes" if q else "No"
             row["quote_product_name"] = q.get("product_name", "") if q else ""
-            row["quote_value"] = q.get("quote_value", "") if q else ""
+            row["quote_value"] = float(q.get("quote_value", 0) or 0) if q else 0.0
             row["quotation_files"] = len(data["prospect_attachments"].get(prospect["id"], []))
             rows.append(row)
 
@@ -632,8 +643,12 @@ def quotations_view(data: dict[str, list[dict[str, Any]]]) -> None:
 
     if quotes:
         q_df = pd.DataFrame(quotes)
+        if "quote_value" in q_df.columns:
+            q_df["quote_value"] = pd.to_numeric(q_df["quote_value"], errors="coerce").fillna(0.0)
         edited_quotes = st.data_editor(q_df, use_container_width=True, hide_index=True, num_rows="dynamic")
         if st.button("Save Quotation Edits", use_container_width=True):
+            if "quote_value" in edited_quotes.columns:
+                edited_quotes["quote_value"] = pd.to_numeric(edited_quotes["quote_value"], errors="coerce").fillna(0.0)
             data["quotations"] = edited_quotes.fillna("").to_dict("records")
             save_data(data)
             st.success("Quotation records updated.")
