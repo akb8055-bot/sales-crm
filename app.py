@@ -29,102 +29,12 @@ CONNECTED_STATUSES = {"Contacted", "Qualified", "Proposal Sent", "Negotiation", 
 
 
 SAMPLE_DATA = {
-    "customers": [
-        {
-            "id": "CUST-1001",
-            "company_name": "Aurora Hospitality Group",
-            "contact_name": "Nadia Rahman",
-            "email": "nadia@aurorahg.com",
-            "phone": "+971-50-123-1111",
-            "industry": "Hospitality",
-            "city": "Abu Dhabi",
-            "country": "UAE",
-            "account_owner": "Adithya",
-            "lifecycle_stage": "Active",
-            "annual_revenue": 2500000,
-            "last_contact": "2026-07-24",
-            "notes": "Prefers quarterly pricing reviews",
-        }
-    ],
-    "prospects": [
-        {
-            "id": "LEAD-2001",
-            "customer_id": "",
-            "company_name": "Seabreeze Resorts",
-            "contact_name": "Liam Farooq",
-            "email": "liam@seabreezeresorts.com",
-            "phone": "+971-50-555-2020",
-            "source": "Referral",
-            "industry": "Hospitality",
-            "product_interest": "Operations Automation Suite",
-            "estimated_value": 120000,
-            "status": "Qualified",
-            "expected_close_date": "2026-08-30",
-            "next_action": "Product demo on Tuesday",
-            "notes": "High urgency due to current vendor issues",
-            "created_at": "2026-07-20 10:00",
-            "updated_at": "2026-07-24 16:15",
-        },
-        {
-            "id": "LEAD-2002",
-            "customer_id": "",
-            "company_name": "BlueHarbor Stays",
-            "contact_name": "Eva Thomas",
-            "email": "eva@blueharborstays.com",
-            "phone": "+971-50-777-9090",
-            "source": "Inbound",
-            "industry": "Real Estate",
-            "product_interest": "Sales Intelligence Module",
-            "estimated_value": 65000,
-            "status": "Proposal Sent",
-            "expected_close_date": "2026-08-12",
-            "next_action": "Follow up on legal redlines",
-            "notes": "Procurement lead requested revised payment terms",
-            "created_at": "2026-07-18 13:20",
-            "updated_at": "2026-07-25 09:10",
-        },
-    ],
-    "quotations": [
-        {
-            "id": "Q-3001",
-            "prospect_id": "LEAD-2002",
-            "customer_name": "BlueHarbor Stays",
-            "product_name": "Sales Intelligence Module",
-            "quote_value": 62000,
-            "currency": "AED",
-            "status": "Sent",
-            "created_date": "2026-07-25",
-            "valid_until": "2026-08-10",
-            "notes": "Includes onboarding and 6 months support",
-        }
-    ],
-    "prospect_attachments": {
-        "LEAD-2002": [
-            {
-                "file_id": "ATT-4001",
-                "file_name": "BlueHarbor_Quote_July.pdf",
-                "mime_type": "application/pdf",
-                "uploaded_at": "2026-07-25 10:40",
-                "content_b64": "U2FtcGxlIFF1b3RhdGlvbiBGaWxl",
-            }
-        ]
-    },
+    "customers": [],
+    "prospects": [],
+    "quotations": [],
+    "prospect_attachments": {},
     "customer_attachments": {},
-    "activity_log": [
-        {
-            "activity_id": "ACT-5001",
-            "activity_type": "Quotation Sent",
-            "entity_type": "prospect",
-            "entity_id": "LEAD-2002",
-            "company_name": "BlueHarbor Stays",
-            "details": "Quotation shared with onboarding support",
-            "product_name": "Sales Intelligence Module",
-            "amount": 62000,
-            "status": "Sent",
-            "activity_date": "2026-07-25",
-            "created_at": "2026-07-25 10:45",
-        }
-    ],
+    "activity_log": [],
 }
 
 
