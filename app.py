@@ -13,7 +13,7 @@ import streamlit.components.v1 as components
 
 st.set_page_config(page_title="Custom Sales CRM", page_icon="📈", layout="wide")
 
-APP_RELEASE = "2026-07-29-r3"
+APP_RELEASE = "2026-07-29-r4"
 DOWNLOADS_DIR = Path.home() / "Downloads"
 
 DATA_FILE = Path(__file__).parent / "crm_data.json"
@@ -34,6 +34,7 @@ SAMPLE_DATA = {
     "customers": [],
     "prospects": [],
     "quotations": [],
+    "purchase_orders": [],
     "prospect_attachments": {},
     "customer_attachments": {},
     "activity_log": [],
@@ -391,6 +392,9 @@ def ensure_schema(data: dict[str, Any]) -> bool:
     if "quotations" not in data:
         data["quotations"] = []
         changed = True
+    if "purchase_orders" not in data or not isinstance(data.get("purchase_orders"), list):
+        data["purchase_orders"] = []
+        changed = True
     if "prospect_attachments" not in data or not isinstance(data.get("prospect_attachments"), dict):
         data["prospect_attachments"] = {}
         changed = True
@@ -423,6 +427,12 @@ def ensure_schema(data: dict[str, Any]) -> bool:
         normalized_quote = pd.to_numeric(pd.Series([quote.get("quote_value", 0)]), errors="coerce").fillna(0.0).iloc[0]
         if quote.get("quote_value") != float(normalized_quote):
             quote["quote_value"] = float(normalized_quote)
+            changed = True
+
+    for po in data["purchase_orders"]:
+        normalized_po = pd.to_numeric(pd.Series([po.get("po_value", 0)]), errors="coerce").fillna(0.0).iloc[0]
+        if po.get("po_value") != float(normalized_po):
+            po["po_value"] = float(normalized_po)
             changed = True
 
     return changed
@@ -715,10 +725,12 @@ def dashboard(data: dict[str, list[dict[str, Any]]]) -> None:
     customers = sanitize_customers(data["customers"])
     prospects = data["prospects"]
     quotations = data["quotations"]
+    purchase_orders = data.get("purchase_orders", [])
     activities = data.get("activity_log", [])
 
     total_pipeline = sum(float(p.get("estimated_value", 0) or 0) for p in prospects if p.get("status") != "Lost")
     won_value = sum(float(p.get("estimated_value", 0) or 0) for p in prospects if p.get("status") == "Won")
+    po_total = sum(float(po.get("po_value", 0) or 0) for po in purchase_orders)
     open_leads = sum(1 for p in prospects if p.get("status") not in {"Won", "Lost"})
     conversion = (sum(1 for p in prospects if p.get("status") == "Won") / len(prospects) * 100) if prospects else 0
     connected = sum(1 for p in prospects if p.get("status") in CONNECTED_STATUSES)
@@ -774,6 +786,11 @@ def dashboard(data: dict[str, list[dict[str, Any]]]) -> None:
                 <div class='stat-label'>Win Rate</div>
                 <div class='stat-value'>{conversion:.1f}%</div>
                 <div class='stat-footnote'>{len(quotations)} quotations issued</div>
+            </div>
+            <div class='stat-card'>
+                <div class='stat-label'>Purchase Orders</div>
+                <div class='stat-value'>{len(purchase_orders)}</div>
+                <div class='stat-footnote'>AED {po_total:,.0f} confirmed value</div>
             </div>
         </div>
         """,
@@ -877,6 +894,18 @@ def dashboard(data: dict[str, list[dict[str, Any]]]) -> None:
         st.dataframe(action_df, width="stretch", hide_index=True)
     else:
         st.markdown("<div class='empty-state'>Add prospects to surface follow-ups, proposals, and close dates here.</div>", unsafe_allow_html=True)
+
+    st.markdown("### Recent Purchase Orders")
+    if purchase_orders:
+        po_df = pd.DataFrame(purchase_orders)
+        if "po_value" in po_df.columns:
+            po_df["po_value"] = pd.to_numeric(po_df["po_value"], errors="coerce").fillna(0.0)
+        show_cols = [c for c in ["id", "po_number", "company_name", "po_value", "currency", "po_date", "status"] if c in po_df.columns]
+        if "po_date" in po_df.columns:
+            po_df = po_df.sort_values("po_date", ascending=False)
+        st.dataframe(po_df.head(8)[show_cols], width="stretch", hide_index=True)
+    else:
+        st.markdown("<div class='empty-state'>No purchase orders uploaded yet. Add one from the Purchase Orders workspace.</div>", unsafe_allow_html=True)
 
 
 def customers_view(data: dict[str, list[dict[str, Any]]]) -> None:
@@ -1074,18 +1103,6 @@ def prospects_view(data: dict[str, list[dict[str, Any]]]) -> None:
         else:
             st.info("Select a prospect from the dropdown to open the edit form.")
 
-    st.markdown("### Upload Quotation PDF Files")
-    render_attachment_manager(
-        data,
-        prospects,
-        key_prefix="prospects",
-        id_field="id",
-        name_field="company_name",
-        attachments_key="prospect_attachments",
-        entity_type="prospect",
-        track_quote_value=True,
-    )
-
     with st.expander("Add New Prospect", expanded=False):
         with st.form("new_prospect_form", clear_on_submit=True):
             p1, p2, p3 = st.columns(3)
@@ -1234,6 +1251,110 @@ def quotations_view(data: dict[str, list[dict[str, Any]]]) -> None:
         entity_type="prospect",
         track_quote_value=True,
     )
+
+
+def purchase_orders_view(data: dict[str, Any]) -> None:
+    st.subheader("Purchase Orders")
+    prospects = data.get("prospects", [])
+    purchase_orders = data.get("purchase_orders", [])
+
+    if purchase_orders:
+        po_df = pd.DataFrame(purchase_orders)
+        if "po_value" in po_df.columns:
+            po_df["po_value"] = pd.to_numeric(po_df["po_value"], errors="coerce").fillna(0.0)
+        show_cols = [
+            c
+            for c in ["id", "po_number", "prospect_id", "company_name", "po_value", "currency", "po_date", "status", "file_name"]
+            if c in po_df.columns
+        ]
+        st.dataframe(po_df[show_cols], width="stretch", hide_index=True)
+    else:
+        st.info("No purchase orders yet. Upload the first PO below.")
+
+    with st.expander("Upload Purchase Order", expanded=True):
+        lead_options = {f"{p['id']} | {p['company_name']}": p for p in prospects}
+        if not lead_options:
+            st.warning("Create a prospect first so a purchase order can be mapped to a lead.")
+        else:
+            with st.form("new_po_form", clear_on_submit=True):
+                selected_label = st.selectbox("Map to Prospect Lead", list(lead_options.keys()))
+                selected_lead = lead_options[selected_label]
+
+                p1, p2, p3 = st.columns(3)
+                po_number = p1.text_input("PO Number*")
+                po_value = p2.number_input("PO Value", min_value=0.0, step=1000.0)
+                currency = p3.selectbox("Currency", ["AED", "USD", "EUR", "GBP"])
+
+                p4, p5 = st.columns(2)
+                po_date = p4.date_input("PO Date", value=date.today())
+                po_status = p5.selectbox("PO Status", ["Received", "Under Review", "Approved", "Fulfilled", "Cancelled"])
+
+                notes = st.text_area("PO Notes")
+                uploaded_po = st.file_uploader("Upload Purchase Order File", type=["pdf"], key="po_file_upload")
+                submitted = st.form_submit_button("Save Purchase Order", width="stretch")
+
+                if submitted:
+                    if not po_number:
+                        st.error("PO number is required.")
+                    elif uploaded_po is None:
+                        st.error("Please upload a PO PDF file.")
+                    else:
+                        new_po = {
+                            "id": next_id("PO", [po.get("id", "") for po in purchase_orders]),
+                            "prospect_id": selected_lead["id"],
+                            "company_name": selected_lead["company_name"],
+                            "po_number": po_number,
+                            "po_value": float(po_value or 0),
+                            "currency": currency,
+                            "po_date": str(po_date),
+                            "status": po_status,
+                            "notes": notes,
+                            "file_name": uploaded_po.name,
+                            "mime_type": uploaded_po.type or "application/pdf",
+                            "content_b64": base64.b64encode(uploaded_po.getvalue()).decode("ascii"),
+                            "uploaded_at": now_stamp(),
+                        }
+                        purchase_orders.append(new_po)
+                        log_activity(
+                            data,
+                            activity_type="Purchase Order Received",
+                            entity_type="prospect",
+                            entity_id=selected_lead["id"],
+                            company_name=selected_lead["company_name"],
+                            details=f"PO {po_number} uploaded",
+                            amount=float(po_value or 0),
+                            status=po_status,
+                        )
+                        save_data_and_refresh(data)
+
+    if purchase_orders:
+        st.markdown("### PO Files")
+        po_options = {f"{po.get('id', '')} | {po.get('po_number', '')} | {po.get('company_name', '')}": po for po in purchase_orders}
+        selected_po_label = st.selectbox("Select Purchase Order", list(po_options.keys()))
+        selected_po = po_options[selected_po_label]
+        if selected_po.get("content_b64"):
+            st.download_button(
+                label=f"Download {selected_po.get('file_name', 'purchase_order.pdf')}",
+                data=base64.b64decode(selected_po.get("content_b64", "")),
+                file_name=selected_po.get("file_name", "purchase_order.pdf"),
+                mime=selected_po.get("mime_type", "application/pdf"),
+                width="stretch",
+            )
+
+        if st.button("Delete Selected Purchase Order", width="stretch"):
+            po_id = selected_po.get("id", "")
+            data["purchase_orders"] = [po for po in purchase_orders if po.get("id") != po_id]
+            log_activity(
+                data,
+                activity_type="Purchase Order Deleted",
+                entity_type="prospect",
+                entity_id=selected_po.get("prospect_id", ""),
+                company_name=selected_po.get("company_name", ""),
+                details=f"Deleted PO {selected_po.get('po_number', '')}",
+                amount=float(selected_po.get("po_value", 0) or 0),
+                status=selected_po.get("status", ""),
+            )
+            save_data_and_refresh(data)
 
 
 def pipeline_view(data: dict[str, list[dict[str, Any]]]) -> None:
@@ -1830,7 +1951,7 @@ def main() -> None:
         st.title("Sales Workspace")
         section = st.radio(
             "Go to",
-            ["Dashboard", "Customers", "Prospects", "Pipeline", "Quotations", "Insights", "Reports"],
+            ["Dashboard", "Customers", "Prospects", "Pipeline", "Quotations", "Purchase Orders", "Insights", "Reports"],
             label_visibility="collapsed",
         )
         st.markdown("---")
@@ -1847,6 +1968,8 @@ def main() -> None:
         pipeline_view(data)
     elif section == "Quotations":
         quotations_view(data)
+    elif section == "Purchase Orders":
+        purchase_orders_view(data)
     elif section == "Insights":
         insights_view(data)
     elif section == "Reports":
