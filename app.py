@@ -2,9 +2,11 @@ import json
 import base64
 import calendar
 import html
+import os
 import re
+from copy import deepcopy
 from io import BytesIO
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from datetime import timedelta
 from pathlib import Path
 from typing import Any
@@ -22,6 +24,8 @@ COMPANY_LOGO_SOURCE = DOWNLOADS_DIR / "WhatsApp_Image_2026-07-08_at_15.51.12__1_
 COMPANY_LOGO_FALLBACK = DOWNLOADS_DIR / "WhatsApp Image 2026-07-08 at 15.51.12.jpeg"
 
 DATA_FILE = Path(__file__).parent / "crm_data.json"
+SUPABASE_TABLE = "crm_state"
+SUPABASE_ROW_ID = "default"
 STATUSES = [
     "New Lead",
     "Contacted",
@@ -44,6 +48,94 @@ SAMPLE_DATA = {
     "customer_attachments": {},
     "activity_log": [],
 }
+
+
+def _get_secret_or_env(name: str, default: str = "") -> str:
+    value = ""
+    try:
+        value = str(st.secrets.get(name, "")).strip()
+    except Exception:
+        value = ""
+    if value:
+        return value
+    return os.getenv(name, default).strip()
+
+
+@st.cache_resource(show_spinner=False)
+def get_supabase_client() -> Any | None:
+    url = _get_secret_or_env("SUPABASE_URL")
+    key = _get_secret_or_env("SUPABASE_KEY")
+    if not url or not key:
+        return None
+    try:
+        from supabase import create_client
+    except Exception:
+        return None
+
+    try:
+        return create_client(url, key)
+    except Exception:
+        return None
+
+
+def _is_supabase_enabled() -> bool:
+    return bool(get_supabase_client())
+
+
+def _load_local_data() -> dict[str, Any]:
+    if not DATA_FILE.exists():
+        default_data = deepcopy(SAMPLE_DATA)
+        _save_local_data(default_data)
+        return default_data
+
+    with DATA_FILE.open("r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def _save_local_data(data: dict[str, Any]) -> None:
+    with DATA_FILE.open("w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2)
+
+
+def _load_supabase_data() -> dict[str, Any] | None:
+    client = get_supabase_client()
+    if client is None:
+        return None
+
+    table_name = _get_secret_or_env("SUPABASE_TABLE", SUPABASE_TABLE) or SUPABASE_TABLE
+    row_id = _get_secret_or_env("SUPABASE_ROW_ID", SUPABASE_ROW_ID) or SUPABASE_ROW_ID
+    try:
+        result = client.table(table_name).select("payload").eq("id", row_id).limit(1).execute()
+    except Exception:
+        return None
+
+    rows = getattr(result, "data", None) or []
+    if not rows:
+        return None
+
+    payload = rows[0].get("payload")
+    if isinstance(payload, dict):
+        return payload
+    return None
+
+
+def _save_supabase_data(data: dict[str, Any]) -> bool:
+    client = get_supabase_client()
+    if client is None:
+        return False
+
+    table_name = _get_secret_or_env("SUPABASE_TABLE", SUPABASE_TABLE) or SUPABASE_TABLE
+    row_id = _get_secret_or_env("SUPABASE_ROW_ID", SUPABASE_ROW_ID) or SUPABASE_ROW_ID
+    record = {
+        "id": row_id,
+        "payload": data,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    try:
+        client.table(table_name).upsert(record).execute()
+        return True
+    except Exception:
+        return False
 
 
 def style_app() -> None:
@@ -963,13 +1055,15 @@ def today_iso() -> str:
     return str(date.today())
 
 
-def load_data() -> dict[str, list[dict[str, Any]]]:
-    if not DATA_FILE.exists():
-        save_data(SAMPLE_DATA)
-        return SAMPLE_DATA
+def load_data() -> dict[str, Any]:
+    cloud_data = _load_supabase_data()
+    if cloud_data is not None:
+        return cloud_data
 
-    with DATA_FILE.open("r", encoding="utf-8") as f:
-        return json.load(f)
+    local_data = _load_local_data()
+    if _is_supabase_enabled():
+        _save_supabase_data(local_data)
+    return local_data
 
 
 def ensure_schema(data: dict[str, Any]) -> bool:
@@ -1029,9 +1123,10 @@ def ensure_schema(data: dict[str, Any]) -> bool:
     return changed
 
 
-def save_data(data: dict[str, list[dict[str, Any]]]) -> None:
-    with DATA_FILE.open("w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2)
+def save_data(data: dict[str, Any]) -> None:
+    if _save_supabase_data(data):
+        return
+    _save_local_data(data)
 
 
 def save_data_and_refresh(data: dict[str, Any]) -> None:
