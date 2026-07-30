@@ -1,6 +1,9 @@
 import json
 import base64
 import calendar
+import html
+import re
+from io import BytesIO
 from datetime import date, datetime
 from datetime import timedelta
 from pathlib import Path
@@ -15,6 +18,8 @@ st.set_page_config(page_title="Custom Sales CRM", page_icon="📈", layout="wide
 
 APP_RELEASE = "2026-07-29-r4"
 DOWNLOADS_DIR = Path.home() / "Downloads"
+COMPANY_LOGO_SOURCE = DOWNLOADS_DIR / "WhatsApp_Image_2026-07-08_at_15.51.12__1_-removebg-preview.png"
+COMPANY_LOGO_FALLBACK = DOWNLOADS_DIR / "WhatsApp Image 2026-07-08 at 15.51.12.jpeg"
 
 DATA_FILE = Path(__file__).parent / "crm_data.json"
 STATUSES = [
@@ -45,40 +50,54 @@ def style_app() -> None:
     st.markdown(
         """
         <style>
-            @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=IBM+Plex+Mono:wght@400;600&display=swap');
+            @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap');
 
             :root {
-                --ink: #13202a;
-                --muted: #5c6f7d;
-                --paper: #f6f8f7;
-                --glass: rgba(255, 255, 255, 0.82);
-                --accent: #0ea5a4;
-                --accent-2: #f97316;
-                --ok: #16a34a;
+                --ink: #0f2130;
+                --muted: #5f7283;
+                --paper: #f4f8fb;
+                --glass: rgba(255, 255, 255, 0.88);
+                --accent: #0f9d90;
+                --accent-2: #ff8f00;
+                --accent-3: #0b6acb;
+                --ok: #1f9d55;
                 --warn: #d97706;
             }
 
             .stApp {
-                font-family: 'Space Grotesk', sans-serif;
+                font-family: 'Plus Jakarta Sans', sans-serif;
                 color: var(--ink);
                 background:
-                    radial-gradient(circle at 10% 5%, rgba(14, 165, 164, 0.22), transparent 32%),
-                    radial-gradient(circle at 86% 12%, rgba(249, 115, 22, 0.20), transparent 34%),
-                    linear-gradient(170deg, #f9fbff 0%, #edf6f3 48%, #f8f4ee 100%);
+                    radial-gradient(circle at 8% 4%, rgba(15, 157, 144, 0.16), transparent 31%),
+                    radial-gradient(circle at 92% 7%, rgba(255, 143, 0, 0.13), transparent 34%),
+                    linear-gradient(165deg, #f9fcff 0%, #eef5fb 52%, #f7f9f4 100%);
+            }
+
+            .block-container {
+                padding-top: 1.2rem !important;
+                padding-bottom: 2.1rem !important;
+                max-width: 1320px;
             }
 
             h1, h2, h3 {
                 letter-spacing: -0.02em;
+                color: var(--ink);
+            }
+
+            @keyframes fadeUp {
+                from { opacity: 0; transform: translateY(10px); }
+                to { opacity: 1; transform: translateY(0); }
             }
 
             .hero {
-                background: linear-gradient(135deg, rgba(10, 18, 28, 0.94), rgba(17, 94, 89, 0.92));
-                border-radius: 20px;
-                padding: 20px 24px;
-                color: #eef9f8;
+                background: linear-gradient(135deg, #103d5d 0%, #0f7f74 58%, #2c8ad6 100%);
+                border-radius: 22px;
+                padding: 22px 26px;
+                color: #effbff;
                 margin-bottom: 14px;
-                border: 1px solid rgba(255, 255, 255, 0.16);
-                box-shadow: 0 14px 30px rgba(12, 22, 34, 0.2);
+                border: 1px solid rgba(255, 255, 255, 0.22);
+                box-shadow: 0 18px 40px rgba(8, 24, 41, 0.26);
+                animation: fadeUp 0.45s ease-out;
             }
 
             .hero-eyebrow {
@@ -88,7 +107,7 @@ def style_app() -> None:
                 padding: 6px 10px;
                 border-radius: 999px;
                 background: rgba(255, 255, 255, 0.12);
-                color: #e8fffc;
+                color: #ebfffd;
                 font-size: 0.78rem;
                 text-transform: uppercase;
                 letter-spacing: 0.12em;
@@ -97,7 +116,7 @@ def style_app() -> None:
 
             .hero-title {
                 margin: 0;
-                font-size: 2rem;
+                font-size: 2.05rem;
                 line-height: 1.1;
             }
 
@@ -108,10 +127,62 @@ def style_app() -> None:
 
             .hero-subtitle {
                 max-width: 68ch;
-                font-size: 0.98rem;
+                font-size: 0.96rem;
                 line-height: 1.55;
                 color: #d5f6f1;
                 margin-top: 10px;
+            }
+
+            .workspace-hero {
+                position: relative;
+                overflow: hidden;
+                background: linear-gradient(140deg, rgba(255,255,255,0.94) 0%, rgba(241,249,255,0.94) 56%, rgba(238,250,246,0.94) 100%);
+                border: 1px solid rgba(16, 61, 85, 0.12);
+                border-radius: 20px;
+                padding: 16px 18px;
+                margin: 0 0 12px;
+                box-shadow: 0 12px 28px rgba(10, 34, 50, 0.08);
+                animation: fadeUp 0.45s ease-out;
+            }
+
+            .workspace-hero::before {
+                content: '';
+                position: absolute;
+                left: 0;
+                top: 0;
+                bottom: 0;
+                width: 5px;
+                background: linear-gradient(180deg, var(--accent-3), var(--accent));
+            }
+
+            .workspace-kicker {
+                display: inline-block;
+                font-size: 0.72rem;
+                text-transform: uppercase;
+                letter-spacing: 0.13em;
+                color: #235171;
+                background: rgba(15, 126, 114, 0.10);
+                border: 1px solid rgba(15, 126, 114, 0.18);
+                border-radius: 999px;
+                padding: 4px 10px;
+                margin-bottom: 8px;
+                font-weight: 700;
+            }
+
+            .workspace-title {
+                margin: 0;
+                color: #112f45;
+                letter-spacing: -0.02em;
+                font-size: 1.35rem;
+                font-weight: 800;
+            }
+
+            .workspace-copy {
+                margin: 6px 0 0;
+                color: #4e6373;
+                font-size: 0.92rem;
+                line-height: 1.5;
+                max-width: 90ch;
             }
 
             .dashboard-grid {
@@ -122,14 +193,21 @@ def style_app() -> None:
             }
 
             .stat-card {
-                background: rgba(255, 255, 255, 0.9);
-                border: 1px solid rgba(15, 30, 42, 0.08);
+                background: rgba(255, 255, 255, 0.93);
+                border: 1px solid rgba(13, 40, 60, 0.08);
                 border-radius: 18px;
                 padding: 16px 18px 16px 20px;
-                box-shadow: 0 14px 28px rgba(15, 31, 45, 0.08);
+                box-shadow: 0 14px 30px rgba(11, 33, 49, 0.09);
                 position: relative;
                 overflow: hidden;
+                animation: fadeUp 0.42s ease-out;
             }
+
+            .stat-card:nth-child(2) { animation-delay: 0.05s; }
+            .stat-card:nth-child(3) { animation-delay: 0.1s; }
+            .stat-card:nth-child(4) { animation-delay: 0.15s; }
+            .stat-card:nth-child(5) { animation-delay: 0.2s; }
+            .stat-card:nth-child(6) { animation-delay: 0.25s; }
 
             .stat-card::before {
                 content: '';
@@ -160,12 +238,13 @@ def style_app() -> None:
             }
 
             .section-card {
-                background: rgba(255, 255, 255, 0.88);
-                border: 1px solid rgba(16, 30, 42, 0.08);
+                background: rgba(255, 255, 255, 0.9);
+                border: 1px solid rgba(16, 42, 58, 0.09);
                 border-radius: 20px;
                 padding: 18px;
-                box-shadow: 0 14px 28px rgba(15, 31, 45, 0.06);
+                box-shadow: 0 16px 32px rgba(10, 27, 41, 0.08);
                 margin-bottom: 4px;
+                animation: fadeUp 0.4s ease-out;
             }
 
             .section-card h3 {
@@ -182,8 +261,8 @@ def style_app() -> None:
             .status-pill {
                 border-radius: 14px;
                 padding: 10px 12px;
-                background: #f7fbfb;
-                border: 1px solid rgba(15, 30, 42, 0.06);
+                background: #f4fbff;
+                border: 1px solid rgba(15, 51, 73, 0.08);
             }
 
             .status-pill .label {
@@ -225,14 +304,14 @@ def style_app() -> None:
             }
 
             .chart-shell {
-                background: linear-gradient(180deg, rgba(255,255,255,0.92), rgba(245,250,249,0.88));
+                background: linear-gradient(180deg, rgba(255,255,255,0.95), rgba(244,251,255,0.9));
                 border: 1px solid rgba(14, 27, 39, 0.10);
                 border-radius: 22px;
                 padding: 18px 18px 10px;
                 box-shadow:
-                    0 18px 36px rgba(9, 27, 38, 0.10),
+                    0 18px 34px rgba(9, 27, 38, 0.11),
                     0 0 0 1px rgba(255,255,255,0.45) inset,
-                    0 0 28px rgba(14, 165, 164, 0.10);
+                    0 0 24px rgba(11, 106, 203, 0.10);
             }
 
             .chart-shell::before {
@@ -246,7 +325,7 @@ def style_app() -> None:
             }
 
             .report-hero {
-                background: linear-gradient(135deg, rgba(8, 47, 73, 0.96), rgba(15, 118, 110, 0.92));
+                background: linear-gradient(135deg, rgba(18, 70, 110, 0.96), rgba(14, 126, 114, 0.92));
                 color: #effdf9;
                 border-radius: 22px;
                 padding: 18px 20px;
@@ -274,7 +353,7 @@ def style_app() -> None:
             }
 
             .report-card {
-                background: rgba(255,255,255,0.9);
+                background: rgba(255,255,255,0.93);
                 border: 1px solid rgba(15, 30, 42, 0.08);
                 border-radius: 18px;
                 padding: 16px 18px;
@@ -332,12 +411,25 @@ def style_app() -> None:
             }
 
             .pipeline-card {
-                background: rgba(255, 255, 255, 0.9);
-                border: 1px solid rgba(12, 32, 46, 0.1);
+                background: rgba(255, 255, 255, 0.95);
+                border: 1px solid rgba(16, 58, 82, 0.12);
                 border-radius: 12px;
                 padding: 10px;
                 margin-bottom: 10px;
-                box-shadow: 0 8px 20px rgba(17, 38, 54, 0.08);
+                box-shadow: 0 8px 18px rgba(14, 33, 48, 0.08);
+            }
+
+            .pipeline-card.heat-cool {
+                border-left: 4px solid rgba(56, 189, 248, 0.9);
+            }
+
+            .pipeline-card.heat-warm {
+                border-left: 4px solid rgba(249, 115, 22, 0.9);
+            }
+
+            .pipeline-card.heat-hot {
+                border-left: 4px solid rgba(239, 68, 68, 0.9);
+                box-shadow: 0 12px 24px rgba(239, 68, 68, 0.14);
             }
 
             .pipeline-title {
@@ -345,14 +437,387 @@ def style_app() -> None:
                 margin-bottom: 6px;
             }
 
+            .pipeline-badge {
+                display: inline-flex;
+                border-radius: 999px;
+                padding: 3px 10px;
+                font-size: 0.68rem;
+                text-transform: uppercase;
+                letter-spacing: 0.09em;
+                font-weight: 800;
+                margin-bottom: 7px;
+                border: 1px solid rgba(17, 58, 83, 0.2);
+                color: #13415f;
+                background: #e6f2fc;
+            }
+
+            .badge-qualified {
+                background: rgba(11, 106, 203, 0.12);
+                color: #0e4b8a;
+                border-color: rgba(11, 106, 203, 0.28);
+            }
+
+            .badge-proposal {
+                background: rgba(249, 115, 22, 0.12);
+                color: #9a460e;
+                border-color: rgba(249, 115, 22, 0.28);
+            }
+
+            .badge-negotiation {
+                background: rgba(234, 179, 8, 0.14);
+                color: #8c5e02;
+                border-color: rgba(234, 179, 8, 0.32);
+            }
+
+            .pipeline-board {
+                display: grid;
+                grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+                gap: 12px;
+                margin-top: 10px;
+            }
+
+            .pipeline-lane {
+                background: linear-gradient(180deg, rgba(255,255,255,0.96), rgba(246,251,255,0.93));
+                border: 1px solid rgba(16, 60, 88, 0.12);
+                border-radius: 16px;
+                padding: 12px;
+                box-shadow: 0 10px 24px rgba(12, 32, 46, 0.08);
+                min-height: 120px;
+            }
+
+            .pipeline-lane.focus-qualified {
+                border-color: rgba(11, 106, 203, 0.34);
+                box-shadow: 0 12px 28px rgba(11, 106, 203, 0.16);
+            }
+
+            .pipeline-lane.focus-proposal {
+                border-color: rgba(249, 115, 22, 0.34);
+                box-shadow: 0 12px 28px rgba(249, 115, 22, 0.15);
+            }
+
+            .pipeline-lane-head {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                gap: 10px;
+                margin-bottom: 8px;
+            }
+
+            .pipeline-lane-title {
+                color: #12344b;
+                font-size: 0.82rem;
+                text-transform: uppercase;
+                letter-spacing: 0.1em;
+                font-weight: 800;
+            }
+
+            .pipeline-count {
+                background: rgba(15, 126, 114, 0.12);
+                border: 1px solid rgba(15, 126, 114, 0.25);
+                color: #10596a;
+                border-radius: 999px;
+                font-size: 0.74rem;
+                font-weight: 800;
+                padding: 2px 10px;
+            }
+
+            .pipeline-empty {
+                color: #688093;
+                font-size: 0.84rem;
+                border: 1px dashed rgba(16, 58, 82, 0.2);
+                border-radius: 10px;
+                padding: 10px;
+                background: rgba(255,255,255,0.7);
+            }
+
             .mono {
-                font-family: 'IBM Plex Mono', monospace;
+                font-family: 'JetBrains Mono', monospace;
                 color: var(--muted);
                 font-size: 0.83rem;
             }
 
+            .stButton > button {
+                border-radius: 12px !important;
+                border: 1px solid rgba(15, 90, 128, 0.22) !important;
+                background: linear-gradient(180deg, #ffffff, #f1f8fd) !important;
+                color: #143449 !important;
+                font-weight: 700 !important;
+                letter-spacing: 0.01em !important;
+                box-shadow: 0 8px 16px rgba(15, 53, 76, 0.10) !important;
+            }
+
+            .stButton > button:hover {
+                border-color: rgba(15, 124, 166, 0.45) !important;
+                transform: translateY(-1px);
+            }
+
+            div[data-baseweb="select"] > div,
+            .stTextInput input,
+            .stTextArea textarea,
+            .stDateInput input,
+            .stNumberInput input {
+                border-radius: 10px !important;
+                border: 1px solid rgba(18, 62, 88, 0.18) !important;
+                background: rgba(255, 255, 255, 0.95) !important;
+            }
+
+            .stDataFrame, .stDataEditor {
+                border: 1px solid rgba(16, 46, 68, 0.10) !important;
+                border-radius: 14px !important;
+                overflow: hidden;
+            }
+
+            .table-shell {
+                background: linear-gradient(180deg, rgba(255,255,255,0.96), rgba(247,252,255,0.94));
+                border: 1px solid rgba(16, 46, 68, 0.11);
+                border-radius: 18px;
+                padding: 12px 12px 8px;
+                box-shadow: 0 14px 26px rgba(13, 35, 49, 0.08);
+                margin-bottom: 12px;
+            }
+
+            .table-head {
+                display: flex;
+                justify-content: space-between;
+                align-items: baseline;
+                gap: 12px;
+                margin: 2px 2px 10px;
+            }
+
+            .table-title {
+                font-size: 0.88rem;
+                text-transform: uppercase;
+                letter-spacing: 0.12em;
+                color: #1f4a67;
+                font-weight: 800;
+            }
+
+            .table-meta {
+                color: #5f7283;
+                font-size: 0.82rem;
+            }
+
+            .dynamic-table {
+                background: linear-gradient(180deg, rgba(255,255,255,0.98), rgba(246,251,255,0.95));
+                border: 1px solid rgba(16, 46, 68, 0.12);
+                border-radius: 18px;
+                padding: 10px;
+                box-shadow: 0 14px 30px rgba(11, 34, 49, 0.08);
+                margin: 8px 0 12px;
+                max-width: 100%;
+                box-sizing: border-box;
+                animation: fadeUp 0.35s ease-out;
+            }
+
+            .dynamic-table.compact .dynamic-row {
+                padding: 6px;
+                gap: 6px;
+            }
+
+            .dynamic-table.compact .dynamic-value {
+                font-size: 0.79rem;
+                line-height: 1.24;
+            }
+
+            .dynamic-table.compact .dynamic-row.header .dynamic-value {
+                font-size: 0.68rem;
+            }
+
+            .dynamic-table.strict-columns {
+                overflow-x: auto;
+                overflow-y: hidden;
+                padding-bottom: 8px;
+            }
+
+            .dynamic-grid-table {
+                border-collapse: separate;
+                border-spacing: 0;
+                width: max-content;
+                min-width: 100%;
+                border: 1px solid rgba(18, 57, 80, 0.14);
+                border-radius: 12px;
+                overflow: hidden;
+            }
+
+            .dynamic-grid-table th,
+            .dynamic-grid-table td {
+                padding: 10px 12px;
+                border-bottom: 1px solid rgba(16, 60, 90, 0.10);
+                border-right: 1px solid rgba(16, 60, 90, 0.08);
+                text-align: left;
+                vertical-align: top;
+                white-space: nowrap;
+            }
+
+            .dynamic-table.compact .dynamic-grid-table th,
+            .dynamic-table.compact .dynamic-grid-table td {
+                padding: 7px 9px;
+                font-size: 0.78rem;
+            }
+
+            .dynamic-grid-table th:last-child,
+            .dynamic-grid-table td:last-child {
+                border-right: 0;
+            }
+
+            .dynamic-grid-table th {
+                background: linear-gradient(180deg, #e8f3ff, #deeeff);
+                color: #163952;
+                font-size: 0.74rem;
+                text-transform: uppercase;
+                letter-spacing: 0.08em;
+                font-weight: 800;
+                position: sticky;
+                top: 0;
+                z-index: 1;
+            }
+
+            .dynamic-grid-table th:first-child,
+            .dynamic-grid-table td:first-child {
+                position: sticky;
+                left: 0;
+                z-index: 2;
+                background: #edf6ff;
+            }
+
+            .dynamic-grid-table th:first-child {
+                z-index: 3;
+                background: #deeeff;
+            }
+
+            .dynamic-grid-table td {
+                background: rgba(255,255,255,0.94);
+                color: #13354b;
+                font-size: 0.85rem;
+                line-height: 1.35;
+            }
+
+            .dynamic-grid-table tr:hover td {
+                background: rgba(238, 248, 255, 0.98);
+            }
+
+            .dynamic-head {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                gap: 10px;
+                margin: 2px 2px 10px;
+            }
+
+            .dynamic-title {
+                text-transform: uppercase;
+                letter-spacing: 0.12em;
+                color: #1a4663;
+                font-size: 0.76rem;
+                font-weight: 800;
+            }
+
+            .dynamic-meta {
+                color: #5f7283;
+                font-size: 0.8rem;
+            }
+
+            .dynamic-row {
+                display: grid;
+                grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+                gap: 8px;
+                border-radius: 12px;
+                padding: 8px;
+                margin-bottom: 8px;
+                border: 1px solid rgba(18, 59, 84, 0.10);
+                background: rgba(255,255,255,0.9);
+            }
+
+            .dynamic-table.strict-columns .dynamic-row {
+                grid-template-columns: repeat(var(--cols), minmax(170px, 1fr));
+                min-width: calc(var(--cols) * 170px);
+                width: max-content;
+            }
+
+            .dynamic-row.header {
+                background: linear-gradient(180deg, #e8f3ff, #deeeff);
+                border-color: rgba(20, 66, 95, 0.20);
+                padding: 7px 8px;
+            }
+
+            .dynamic-cell {
+                min-width: 0;
+                overflow-wrap: anywhere;
+            }
+
+            .dynamic-label {
+                display: none;
+                font-size: 0.7rem;
+                text-transform: uppercase;
+                letter-spacing: 0.09em;
+                color: #618097;
+                margin-bottom: 3px;
+                font-weight: 700;
+            }
+
+            .dynamic-value {
+                color: #13354b;
+                font-size: 0.86rem;
+                line-height: 1.35;
+                white-space: normal;
+                overflow: visible;
+                text-overflow: unset;
+                word-break: break-word;
+            }
+
+            .dynamic-row.header .dynamic-value {
+                color: #163952;
+                font-size: 0.75rem;
+                text-transform: uppercase;
+                letter-spacing: 0.08em;
+                font-weight: 800;
+            }
+
+            .dynamic-row:hover {
+                border-color: rgba(15, 110, 150, 0.28);
+                box-shadow: 0 8px 18px rgba(12, 47, 67, 0.12);
+            }
+
+            @media (max-width: 900px) {
+                .dynamic-table:not(.strict-columns) .dynamic-row {
+                    grid-template-columns: repeat(2, minmax(130px, 1fr));
+                }
+
+                .dynamic-table:not(.strict-columns) .dynamic-row.header {
+                    display: none;
+                }
+
+                .dynamic-table:not(.strict-columns) .dynamic-label {
+                    display: block;
+                }
+            }
+
+            div[data-testid="stDataFrame"] [role="grid"],
+            div[data-testid="stDataEditor"] [role="grid"] {
+                border-radius: 12px !important;
+                border: 1px solid rgba(17, 53, 76, 0.14) !important;
+            }
+
+            div[data-testid="stDataFrame"] [role="columnheader"],
+            div[data-testid="stDataEditor"] [role="columnheader"] {
+                background: linear-gradient(180deg, #eaf5ff, #e0effd) !important;
+                color: #163952 !important;
+                font-weight: 700 !important;
+                border-bottom: 1px solid rgba(16, 62, 92, 0.15) !important;
+            }
+
+            div[data-testid="stDataFrame"] [role="gridcell"],
+            div[data-testid="stDataEditor"] [role="gridcell"] {
+                border-bottom: 1px solid rgba(16, 60, 90, 0.08) !important;
+                background: rgba(255,255,255,0.92) !important;
+            }
+
+            div[data-testid="stDataEditor"] input {
+                background: rgba(255,255,255,0.98) !important;
+            }
+
             .stSidebar {
-                background: linear-gradient(180deg, #0f2f31 0%, #103343 55%, #172430 100%);
+                background: linear-gradient(180deg, #0f3448 0%, #14526e 42%, #123147 100%);
             }
 
             .stSidebar * {
@@ -366,6 +831,132 @@ def style_app() -> None:
 
 def now_stamp() -> str:
     return datetime.now().strftime("%Y-%m-%d %H:%M")
+
+
+def render_workspace_hero(eyebrow: str, title: str, subtitle: str) -> None:
+    st.markdown(
+        f"""
+        <div class='workspace-hero'>
+            <div class='workspace-kicker'>{html.escape(eyebrow)}</div>
+            <h3 class='workspace-title'>{html.escape(title)}</h3>
+            <p class='workspace-copy'>{html.escape(subtitle)}</p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def _fmt_dynamic_value(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, float):
+        if pd.isna(value):
+            return ""
+        if value.is_integer():
+            return f"{int(value):,}"
+        return f"{value:,.2f}"
+    return str(value)
+
+
+def render_dynamic_table(
+    df: pd.DataFrame,
+    title: str,
+    key: str,
+    max_rows: int = 120,
+    strict_columns: bool = False,
+    enable_compact_toggle: bool = True,
+) -> pd.DataFrame:
+    if df is None or df.empty:
+        st.info("No records available.")
+        return df
+
+    working = df.copy().fillna("")
+    query = st.text_input(
+        f"Search {title}",
+        key=f"search_{key}",
+        placeholder="Filter across all columns...",
+    ).strip()
+
+    if query:
+        mask = working.astype(str).apply(lambda col: col.str.contains(query, case=False, na=False))
+        working = working[mask.any(axis=1)]
+
+    compact_mode = st.session_state.get(f"compact_{key}", False)
+    if enable_compact_toggle:
+        compact_mode = st.toggle(
+            f"Compact mode for {title}",
+            key=f"compact_{key}",
+            help="Reduce row height and text sizing for denser table scanning.",
+        )
+
+    display_df = working.head(max_rows)
+    cols = list(display_df.columns)
+    col_count = max(1, len(cols))
+
+    if strict_columns:
+        header_html = "".join(
+            f"<th>{html.escape(str(col).replace('_', ' ').title())}</th>"
+            for col in cols
+        )
+        body_html = []
+        for _, row in display_df.iterrows():
+            row_html = "".join(
+                f"<td>{html.escape(_fmt_dynamic_value(row.get(col, '')))}</td>"
+                for col in cols
+            )
+            body_html.append(f"<tr>{row_html}</tr>")
+
+        st.markdown(
+            f"""
+            <div class='dynamic-table strict-columns{' compact' if compact_mode else ''}'>
+                <div class='dynamic-head'>
+                    <div class='dynamic-title'>{html.escape(title)}</div>
+                    <div class='dynamic-meta'>{len(working)} rows{f" | showing {len(display_df)}" if len(working) > len(display_df) else ""}</div>
+                </div>
+                <table class='dynamic-grid-table'>
+                    <thead><tr>{header_html}</tr></thead>
+                    <tbody>{''.join(body_html)}</tbody>
+                </table>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        return working
+
+    header_cells = "".join(
+        f"<div class='dynamic-cell'><div class='dynamic-value'>{html.escape(str(col).replace('_', ' ').title())}</div></div>"
+        for col in cols
+    )
+
+    body_rows = []
+    for _, row in display_df.iterrows():
+        row_cells = []
+        for col in cols:
+            label = html.escape(str(col).replace("_", " ").title())
+            value = html.escape(_fmt_dynamic_value(row.get(col, "")))
+            row_cells.append(
+                f"<div class='dynamic-cell'><div class='dynamic-label'>{label}</div><div class='dynamic-value'>{value}</div></div>"
+            )
+        body_rows.append(f"<div class='dynamic-row' style='--cols: {col_count};'>{''.join(row_cells)}</div>")
+
+    table_class = "dynamic-table strict-columns" if strict_columns else "dynamic-table"
+    if compact_mode:
+        table_class += " compact"
+
+    st.markdown(
+        f"""
+        <div class='{table_class}'>
+            <div class='dynamic-head'>
+                <div class='dynamic-title'>{html.escape(title)}</div>
+                <div class='dynamic-meta'>{len(working)} rows{f" | showing {len(display_df)}" if len(working) > len(display_df) else ""}</div>
+            </div>
+            <div class='dynamic-row header' style='--cols: {col_count};'>{header_cells}</div>
+            {''.join(body_rows)}
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    return working
 
 
 def today_iso() -> str:
@@ -509,6 +1100,209 @@ def sanitize_customers(customers: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return cleaned
 
 
+def _parse_money_value(raw_value: str) -> float | None:
+    cleaned = raw_value.replace(",", "").strip()
+    try:
+        return float(cleaned)
+    except ValueError:
+        return None
+
+
+def _extract_date_from_text(raw: str) -> date | None:
+    cleaned = raw.strip().replace(",", " ")
+    patterns = [
+        "%d/%m/%Y",
+        "%d-%m-%Y",
+        "%Y-%m-%d",
+        "%d %m %Y",
+        "%d %b %Y",
+        "%d %B %Y",
+    ]
+
+    candidate_tokens = re.findall(r"\d{1,4}[/-]\d{1,2}[/-]\d{2,4}|\d{1,2}\s+[A-Za-z]{3,9}\s+\d{2,4}", cleaned)
+    for token in candidate_tokens:
+        token_clean = " ".join(token.split())
+        for fmt in patterns:
+            try:
+                parsed = datetime.strptime(token_clean, fmt).date()
+                return parsed
+            except ValueError:
+                continue
+    return None
+
+
+def _extract_quote_prefill_from_text(text: str) -> dict[str, Any]:
+    lines = [ln.strip() for ln in text.splitlines() if ln and ln.strip()]
+    short_lines = [ln for ln in lines if len(ln) <= 110]
+
+    title = ""
+    quote_number = ""
+    valid_until: date | None = None
+    confidence = 0.0
+    evidence = ""
+
+    subject_patterns = [
+        re.compile(r"(?i)^subject\s*[:\-]\s*(.+)$"),
+        re.compile(r"(?i)^quotation\s*(?:for|to|subject)?\s*[:\-]\s*(.+)$"),
+    ]
+
+    for ln in short_lines[:20]:
+        for pattern in subject_patterns:
+            m = pattern.search(ln)
+            if m:
+                title = m.group(1).strip()
+                confidence = 0.95
+                evidence = ln
+                break
+        if title:
+            break
+
+    if not title:
+        for ln in short_lines[:15]:
+            if "quotation" in ln.lower() and len(ln) > 10:
+                title = ln
+                confidence = 0.65
+                evidence = ln
+                break
+
+    quote_no_pattern = re.compile(r"(?i)\b(?:quotation|quote)\s*(?:no|number|#|ref(?:erence)?)\s*[:#\-]?\s*([A-Z0-9\-\/]+)")
+    for ln in short_lines[:30]:
+        m = quote_no_pattern.search(ln)
+        if m:
+            quote_number = m.group(1).strip()
+            confidence = max(confidence, 0.7)
+            if not evidence:
+                evidence = ln
+            break
+
+    valid_until_pattern = re.compile(r"(?i)\b(?:valid\s*until|expiry|expiration|exp\.?\s*date)\s*[:\-]?\s*(.+)$")
+    for ln in short_lines[:40]:
+        m = valid_until_pattern.search(ln)
+        if m:
+            parsed_date = _extract_date_from_text(m.group(1))
+            if parsed_date:
+                valid_until = parsed_date
+                confidence = max(confidence, 0.7)
+                if not evidence:
+                    evidence = ln
+                break
+
+    currency = ""
+    amount: float | None = None
+    amount_score = 0.0
+
+    money_pattern_1 = re.compile(r"\b(AED|USD|EUR|GBP)\s*([0-9][0-9,]*(?:\.[0-9]{1,2})?)\b", re.IGNORECASE)
+    money_pattern_2 = re.compile(r"\b([0-9][0-9,]*(?:\.[0-9]{1,2})?)\s*(AED|USD|EUR|GBP)\b", re.IGNORECASE)
+    priority_words = ("total", "grand", "amount", "net", "quotation value", "final")
+
+    for ln in short_lines[:80]:
+        line_score = 0.55
+        if any(word in ln.lower() for word in priority_words):
+            line_score += 0.30
+
+        matches = list(money_pattern_1.finditer(ln))
+        if not matches:
+            matches = list(money_pattern_2.finditer(ln))
+
+        for match in matches:
+            if len(match.groups()) != 2:
+                continue
+            if match.re is money_pattern_1:
+                ccy = match.group(1).upper()
+                value_raw = match.group(2)
+            else:
+                value_raw = match.group(1)
+                ccy = match.group(2).upper()
+
+            parsed = _parse_money_value(value_raw)
+            if parsed is None:
+                continue
+            if parsed > 0 and line_score >= amount_score:
+                amount = parsed
+                currency = ccy
+                amount_score = line_score
+                evidence = ln if not evidence else evidence
+
+    combined_confidence = max(confidence, amount_score)
+    return {
+        "title": title,
+        "quote_number": quote_number,
+        "value": amount,
+        "currency": currency or "AED",
+        "valid_until": valid_until,
+        "confidence": max(0.0, min(1.0, combined_confidence)),
+        "evidence": evidence,
+        "source": "text",
+    }
+
+
+def _extract_quote_prefill_with_ocr(pdf_bytes: bytes) -> dict[str, Any]:
+    try:
+        import pypdfium2 as pdfium
+        import pytesseract
+    except Exception:
+        return {"title": "", "quote_number": "", "value": None, "currency": "AED", "valid_until": None, "confidence": 0.0, "evidence": "ocr_unavailable", "source": "ocr"}
+
+    try:
+        doc = pdfium.PdfDocument(BytesIO(pdf_bytes))
+        if len(doc) == 0:
+            return {"title": "", "quote_number": "", "value": None, "currency": "AED", "valid_until": None, "confidence": 0.0, "evidence": "ocr_empty_doc", "source": "ocr"}
+        page = doc[0]
+        bitmap = page.render(scale=2.0)
+        pil_image = bitmap.to_pil()
+        ocr_text = pytesseract.image_to_string(pil_image) or ""
+        extracted = _extract_quote_prefill_from_text(ocr_text)
+        extracted["source"] = "ocr"
+        return extracted
+    except Exception:
+        return {"title": "", "quote_number": "", "value": None, "currency": "AED", "valid_until": None, "confidence": 0.0, "evidence": "ocr_parse_error", "source": "ocr"}
+
+
+def _extract_quote_prefill_from_pdf_bytes(pdf_bytes: bytes) -> dict[str, Any]:
+    try:
+        from pypdf import PdfReader
+    except Exception:
+        return _extract_quote_prefill_with_ocr(pdf_bytes)
+
+    try:
+        reader = PdfReader(BytesIO(pdf_bytes))
+        extracted_parts: list[str] = []
+        for page in reader.pages[:2]:
+            extracted_parts.append(page.extract_text() or "")
+        text = "\n".join(extracted_parts).strip()
+        if not text:
+            return _extract_quote_prefill_with_ocr(pdf_bytes)
+
+        parsed_text = _extract_quote_prefill_from_text(text)
+        if float(parsed_text.get("confidence", 0.0) or 0.0) < 0.45:
+            parsed_ocr = _extract_quote_prefill_with_ocr(pdf_bytes)
+            if float(parsed_ocr.get("confidence", 0.0) or 0.0) > float(parsed_text.get("confidence", 0.0) or 0.0):
+                return parsed_ocr
+        return parsed_text
+    except Exception:
+        return _extract_quote_prefill_with_ocr(pdf_bytes)
+
+
+def _infer_quote_prefill_from_uploads(uploaded_files: list[Any]) -> dict[str, Any]:
+    best = {
+        "title": "",
+        "quote_number": "",
+        "value": None,
+        "currency": "AED",
+        "valid_until": None,
+        "confidence": 0.0,
+        "evidence": "",
+        "source": "",
+        "file_name": "",
+    }
+    for fobj in uploaded_files:
+        parsed = _extract_quote_prefill_from_pdf_bytes(fobj.getvalue())
+        if float(parsed.get("confidence", 0.0) or 0.0) > float(best.get("confidence", 0.0) or 0.0):
+            parsed["file_name"] = fobj.name
+            best = parsed
+    return best
+
+
 def log_activity(
     data: dict[str, Any],
     activity_type: str,
@@ -577,44 +1371,145 @@ def render_attachment_manager(
     quote_notes = ""
 
     if track_quote_value:
+        title_key = f"{key_prefix}_quote_title"
+        number_key = f"{key_prefix}_quote_number"
+        value_key = f"{key_prefix}_quote_value"
+        currency_key = f"{key_prefix}_quote_currency"
+        status_key = f"{key_prefix}_quote_status"
+        valid_until_key = f"{key_prefix}_quote_valid_until"
+        notes_key = f"{key_prefix}_quote_notes"
+        extract_msg_key = f"{key_prefix}_quote_extract_msg"
+        extract_fp_key = f"{key_prefix}_quote_extract_fp"
+        extract_preview_key = f"{key_prefix}_quote_extract_preview"
+
+        if title_key not in st.session_state:
+            st.session_state[title_key] = ""
+        if number_key not in st.session_state:
+            st.session_state[number_key] = ""
+        if value_key not in st.session_state:
+            st.session_state[value_key] = 0.0
+        if currency_key not in st.session_state:
+            st.session_state[currency_key] = "AED"
+        if status_key not in st.session_state:
+            st.session_state[status_key] = "Sent"
+        if valid_until_key not in st.session_state:
+            st.session_state[valid_until_key] = date.today()
+        if notes_key not in st.session_state:
+            st.session_state[notes_key] = ""
+
+        if uploaded_files:
+            file_signature = "|".join(f"{fobj.name}:{getattr(fobj, 'size', 0)}" for fobj in uploaded_files)
+            extract_fingerprint = f"{upload_prospect_id}:{file_signature}"
+            if st.session_state.get(extract_fp_key, "") != extract_fingerprint:
+                inferred = _infer_quote_prefill_from_uploads(uploaded_files)
+                inferred_title = str(inferred.get("title", "") or "").strip()
+                inferred_number = str(inferred.get("quote_number", "") or "").strip()
+                inferred_value = inferred.get("value", None)
+                inferred_currency = str(inferred.get("currency", "AED") or "AED").upper()
+                inferred_valid_until = inferred.get("valid_until", None)
+                inferred_conf = float(inferred.get("confidence", 0.0) or 0.0)
+
+                if inferred_title:
+                    st.session_state[title_key] = inferred_title
+                if inferred_number:
+                    st.session_state[number_key] = inferred_number
+                if isinstance(inferred_value, (int, float)) and inferred_value > 0:
+                    st.session_state[value_key] = float(inferred_value)
+                if inferred_currency in ["AED", "USD", "EUR", "GBP"]:
+                    st.session_state[currency_key] = inferred_currency
+                if isinstance(inferred_valid_until, date):
+                    st.session_state[valid_until_key] = inferred_valid_until
+
+                st.session_state[extract_preview_key] = {
+                    "file_name": inferred.get("file_name", ""),
+                    "source": inferred.get("source", "text"),
+                    "confidence": inferred_conf,
+                    "evidence": inferred.get("evidence", ""),
+                    "title": inferred_title,
+                    "quote_number": inferred_number,
+                    "value": inferred_value,
+                    "currency": inferred_currency,
+                    "valid_until": inferred_valid_until,
+                }
+
+                if inferred_conf >= 0.8:
+                    st.session_state[extract_msg_key] = "Auto-filled from quotation PDF with high confidence."
+                elif inferred_conf >= 0.5:
+                    st.session_state[extract_msg_key] = "Auto-filled from quotation PDF. Please verify before saving."
+                else:
+                    st.session_state[extract_msg_key] = "Could not confidently read quotation details. Please fill manually."
+
+                st.session_state[extract_fp_key] = extract_fingerprint
+
         st.markdown("##### Quotation Details")
+        extract_msg = st.session_state.get(extract_msg_key, "")
+        if extract_msg:
+            st.caption(extract_msg)
+
+        preview = st.session_state.get(extract_preview_key, {})
+        if preview:
+            preview_source = "OCR fallback" if preview.get("source") == "ocr" else "PDF text"
+            preview_conf = float(preview.get("confidence", 0.0) or 0.0) * 100
+            preview_title = preview.get("title", "") or "Not found"
+            preview_num = preview.get("quote_number", "") or "Not found"
+            preview_value = preview.get("value", None)
+            preview_currency = preview.get("currency", "AED")
+            preview_date = preview.get("valid_until", None)
+            preview_evidence = preview.get("evidence", "") or "No evidence line available"
+            amount_line = f"{preview_currency} {float(preview_value):,.0f}" if isinstance(preview_value, (int, float)) else "Not found"
+            date_line = str(preview_date) if isinstance(preview_date, date) else "Not found"
+            st.markdown(
+                f"""
+                <div class='report-note'>
+                    <strong>Auto Extraction Preview</strong><br/>
+                    File: {preview.get('file_name', 'N/A')} | Source: {preview_source} | Confidence: {preview_conf:.0f}%<br/>
+                    Subject: {preview_title}<br/>
+                    Quotation Number: {preview_num}<br/>
+                    Amount: {amount_line} | Valid Until: {date_line}<br/>
+                    Evidence: {preview_evidence}
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
         q1, q2 = st.columns(2)
         quote_title = q1.text_input(
             "Quotation Title",
-            value=f"Uploaded quotation for {upload_label.split(' | ', 1)[1]}",
-            key=f"{key_prefix}_quote_title",
+            placeholder="Enter quotation title",
+            key=title_key,
         )
         quote_value = q2.number_input(
             "Quotation Value (AED)",
             min_value=0.0,
             step=1000.0,
-            key=f"{key_prefix}_quote_value",
+            key=value_key,
         )
 
-        q3, q4 = st.columns(2)
+        q3, q4, q7 = st.columns(3)
         quote_currency = q3.selectbox(
             "Currency",
             ["AED", "USD", "EUR", "GBP"],
-            index=0,
-            key=f"{key_prefix}_quote_currency",
+            key=currency_key,
         )
         quote_status = q4.selectbox(
             "Quotation Status",
             QUOTE_STATUSES,
-            index=1,
-            key=f"{key_prefix}_quote_status",
+            key=status_key,
+        )
+        quote_number = q7.text_input(
+            "Quotation Number",
+            placeholder="QTN-2026-001",
+            key=number_key,
         )
 
         q5, q6 = st.columns(2)
         quote_valid_until = q5.date_input(
             "Valid Until",
-            value=date.today(),
-            key=f"{key_prefix}_quote_valid_until",
+            key=valid_until_key,
         )
         quote_notes = q6.text_input(
             "Notes",
-            value="",
-            key=f"{key_prefix}_quote_notes",
+            key=notes_key,
         )
 
     if st.button("Save Uploaded PDF Files", width="stretch", key=f"{key_prefix}_save_upload_btn"):
@@ -623,7 +1518,7 @@ def render_attachment_manager(
         else:
             files_for_prospect = attachments.setdefault(upload_prospect_id, [])
             current_ids = [f.get("file_id", "") for f in files_for_prospect]
-            created_quote = False
+            new_file_ids: list[str] = []
             for fobj in uploaded_files:
                 new_file = {
                     "file_id": next_id("ATT", current_ids),
@@ -634,6 +1529,7 @@ def render_attachment_manager(
                 }
                 files_for_prospect.append(new_file)
                 current_ids.append(new_file["file_id"])
+                new_file_ids.append(new_file["file_id"])
                 entity_id, entity_name = upload_label.split(" | ", 1)
                 log_activity(
                     data,
@@ -644,7 +1540,7 @@ def render_attachment_manager(
                     details=f"Uploaded file {fobj.name}",
                 )
 
-            if track_quote_value and not created_quote:
+            if track_quote_value:
                 entity_id, entity_name = upload_label.split(" | ", 1)
                 new_quote = {
                     "id": next_id("Q", [q.get("id", "") for q in data["quotations"]]),
@@ -654,15 +1550,25 @@ def render_attachment_manager(
                     "source_entity_type": entity_type,
                     "source_entity_id": upload_prospect_id,
                     "product_name": quote_title or f"Uploaded quotation for {entity_name}",
+                    "quote_number": quote_number,
                     "quote_value": float(quote_value or 0),
                     "currency": quote_currency,
                     "status": quote_status,
                     "created_date": today_iso(),
                     "valid_until": str(quote_valid_until),
                     "notes": quote_notes,
+                    "extraction_source": st.session_state.get(extract_preview_key, {}).get("source", ""),
+                    "extraction_confidence": float(st.session_state.get(extract_preview_key, {}).get("confidence", 0.0) or 0.0),
+                    "extraction_evidence": st.session_state.get(extract_preview_key, {}).get("evidence", ""),
                     "attachment_count": len(uploaded_files),
                 }
                 data["quotations"].append(new_quote)
+
+                # Link each newly uploaded file to the quotation record created in this upload action.
+                for fmeta in files_for_prospect:
+                    if fmeta.get("file_id") in new_file_ids:
+                        fmeta["linked_quotation_id"] = new_quote["id"]
+
                 log_activity(
                     data,
                     activity_type="Proposal Shared",
@@ -813,9 +1719,10 @@ def dashboard(data: dict[str, list[dict[str, Any]]]) -> None:
         st.markdown("<div class='section-card'>", unsafe_allow_html=True)
         st.markdown("#### Largest Active Opportunity")
         if top_prospect:
-            st.markdown(f"**{top_prospect.get('company_name', '')}**")
+            company_name = html.escape(str(top_prospect.get("company_name", "")).strip())
+            st.markdown(f"<div><strong>{company_name}</strong></div>", unsafe_allow_html=True)
             st.caption(f"{top_prospect.get('product_interest', 'No product')} | AED {float(top_prospect.get('estimated_value', 0) or 0):,.0f}")
-            st.caption(f"Stage: {top_prospect.get('status', 'Unknown')} | Next: {top_prospect.get('next_action', 'Not set') or 'Not set'}")
+            st.caption(f"Stage: {top_prospect.get('status', 'Unknown')} | Next action: {top_prospect.get('next_action', 'Not set') or 'Not set'}")
         else:
             st.markdown("<div class='empty-state'>Add a prospect to surface the highest-value opportunity here.</div>", unsafe_allow_html=True)
         st.markdown("</div>", unsafe_allow_html=True)
@@ -823,7 +1730,8 @@ def dashboard(data: dict[str, list[dict[str, Any]]]) -> None:
         st.markdown("<div class='section-card'>", unsafe_allow_html=True)
         st.markdown("#### Latest Quotation")
         if latest_quote:
-            st.markdown(f"**{latest_quote.get('customer_name', '')}**")
+            customer_name = html.escape(str(latest_quote.get("customer_name", "")).strip())
+            st.markdown(f"<div><strong>{customer_name}</strong></div>", unsafe_allow_html=True)
             st.caption(f"{latest_quote.get('product_name', '')} | {latest_quote.get('currency', 'AED')} {float(latest_quote.get('quote_value', 0) or 0):,.0f}")
             st.caption(f"Status: {latest_quote.get('status', 'Draft')} | Valid until: {latest_quote.get('valid_until', 'Not set')}")
         else:
@@ -876,7 +1784,6 @@ def dashboard(data: dict[str, list[dict[str, Any]]]) -> None:
                     f"""
                     <div class='timeline-item'>
                         <strong>{item.get('activity_type', 'Activity')}</strong><br/>
-                        <div>{item.get('company_name', '')}</div>
                         <div class='timeline-meta'>{item.get('details', '')} · {item.get('activity_date', '')}</div>
                     </div>
                     """,
@@ -891,7 +1798,7 @@ def dashboard(data: dict[str, list[dict[str, Any]]]) -> None:
     if not action_df.empty:
         action_df = action_df[action_df["status"].isin(["Contacted", "Qualified", "Proposal Sent", "Negotiation"])]
         action_df = action_df[["company_name", "contact_name", "status", "next_action", "expected_close_date"]]
-        st.dataframe(action_df, width="stretch", hide_index=True)
+        render_dynamic_table(action_df, "Upcoming Actions", key="dashboard_upcoming_actions", max_rows=30)
     else:
         st.markdown("<div class='empty-state'>Add prospects to surface follow-ups, proposals, and close dates here.</div>", unsafe_allow_html=True)
 
@@ -903,13 +1810,17 @@ def dashboard(data: dict[str, list[dict[str, Any]]]) -> None:
         show_cols = [c for c in ["id", "po_number", "company_name", "po_value", "currency", "po_date", "status"] if c in po_df.columns]
         if "po_date" in po_df.columns:
             po_df = po_df.sort_values("po_date", ascending=False)
-        st.dataframe(po_df.head(8)[show_cols], width="stretch", hide_index=True)
+        render_dynamic_table(po_df.head(8)[show_cols], "Recent Purchase Orders", key="dashboard_recent_pos", max_rows=8)
     else:
         st.markdown("<div class='empty-state'>No purchase orders uploaded yet. Add one from the Purchase Orders workspace.</div>", unsafe_allow_html=True)
 
 
 def customers_view(data: dict[str, list[dict[str, Any]]]) -> None:
-    st.subheader("Customer Directory")
+    render_workspace_hero(
+        "Workspace",
+        "Customer Directory",
+        "Manage strategic accounts, clean customer records, and keep account intelligence decision-ready.",
+    )
     customers = sanitize_customers(data["customers"])
     if len(customers) != len(data["customers"]):
         data["customers"] = customers
@@ -917,10 +1828,12 @@ def customers_view(data: dict[str, list[dict[str, Any]]]) -> None:
 
     if customers:
         customer_df = pd.DataFrame(customers)
-        edited = st.data_editor(customer_df, width="stretch", hide_index=True, num_rows="dynamic")
-        if st.button("Save Customer Edits", width="stretch"):
-            data["customers"] = sanitize_customers(edited.fillna("").to_dict("records"))
-            save_data_and_refresh(data)
+        render_dynamic_table(customer_df, "Customer Ledger", key="customers_ledger", max_rows=80)
+        with st.expander("Edit Customer Records", expanded=False):
+            edited = st.data_editor(customer_df, width="stretch", hide_index=True, num_rows="dynamic")
+            if st.button("Save Customer Edits", width="stretch"):
+                data["customers"] = sanitize_customers(edited.fillna("").to_dict("records"))
+                save_data_and_refresh(data)
 
         st.markdown("### Delete Customer")
         delete_options = {f"{c.get('id', '')} | {c.get('company_name', '')}": c for c in customers}
@@ -1009,7 +1922,11 @@ def customers_view(data: dict[str, list[dict[str, Any]]]) -> None:
 
 
 def prospects_view(data: dict[str, list[dict[str, Any]]]) -> None:
-    st.subheader("Prospect Tracker")
+    render_workspace_hero(
+        "Workspace",
+        "Prospect Tracker",
+        "Track every lead with stage clarity, opportunity value, quotation context, and next-action discipline.",
+    )
     prospects = data["prospects"]
     quotes_by_prospect = latest_quote_map(data["quotations"])
 
@@ -1025,7 +1942,14 @@ def prospects_view(data: dict[str, list[dict[str, Any]]]) -> None:
             rows.append(row)
 
         p_df = pd.DataFrame(rows)
-        st.dataframe(p_df, width="stretch", hide_index=True)
+        p_df = p_df.drop(columns=["customer_id"], errors="ignore")
+        render_dynamic_table(
+            p_df,
+            "Live Opportunity Register",
+            key="prospects_register",
+            max_rows=90,
+            strict_columns=True,
+        )
     else:
         st.info("No prospects yet. Add leads and opportunities below.")
 
@@ -1163,98 +2087,201 @@ def prospects_view(data: dict[str, list[dict[str, Any]]]) -> None:
 
 
 def quotations_view(data: dict[str, list[dict[str, Any]]]) -> None:
-    st.subheader("Quotations")
+    render_workspace_hero(
+        "Workspace",
+        "Quotations",
+        "Control pricing output, quotation lifecycle, and supporting files from a single premium command surface.",
+    )
     quotes = data["quotations"]
     prospects = data["prospects"]
+    lead_map = {p.get("id", ""): p for p in prospects}
+    attachments = data.get("prospect_attachments", {})
 
-    if quotes:
-        q_df = pd.DataFrame(quotes)
-        if "quote_value" in q_df.columns:
-            q_df["quote_value"] = pd.to_numeric(q_df["quote_value"], errors="coerce").fillna(0.0)
-        edited_quotes = st.data_editor(q_df, width="stretch", hide_index=True, num_rows="dynamic")
-        if st.button("Save Quotation Edits", width="stretch"):
-            if "quote_value" in edited_quotes.columns:
-                edited_quotes["quote_value"] = pd.to_numeric(edited_quotes["quote_value"], errors="coerce").fillna(0.0)
-            data["quotations"] = edited_quotes.fillna("").to_dict("records")
-            save_data_and_refresh(data)
-    else:
-        st.info("No quotations created yet.")
+    total_quote_value = sum(float(q.get("quote_value", 0) or 0) for q in quotes)
+    total_uploaded_files = sum(len(v) for v in attachments.values())
+    k1, k2, k3 = st.columns(3)
+    k1.metric("Quotation Records", len(quotes))
+    k2.metric("Total Quotation Value", f"AED {total_quote_value:,.0f}")
+    k3.metric("Uploaded Quotation PDFs", total_uploaded_files)
 
-    with st.expander("Generate New Quotation", expanded=False):
-        with st.form("new_quote_form", clear_on_submit=True):
-            lead_options = {f"{p['id']} | {p['company_name']} ({p['status']})": p for p in prospects}
-            selected_label = st.selectbox("Prospect", list(lead_options.keys()) if lead_options else ["No prospects available"])
-            selected_lead = lead_options.get(selected_label)
+    records_tab, upload_tab, files_tab = st.tabs(["Quotation Records", "Upload by Lead", "Uploaded Files Library"])
 
-            c1, c2, c3 = st.columns(3)
-            product = c1.text_input("Product Name*")
-            value = c2.number_input("Quotation Value", min_value=0.0, step=1000.0)
-            currency = c3.selectbox("Currency", ["AED", "USD", "EUR", "GBP"])
-
-            d1, d2 = st.columns(2)
-            quote_status = d1.selectbox("Quote Status", QUOTE_STATUSES)
-            valid_until = d2.date_input("Valid Until", value=date.today())
-
-            notes = st.text_area("Commercial Notes")
-            submitted = st.form_submit_button("Create Quotation", width="stretch")
-
-            if submitted:
-                if not selected_lead:
-                    st.error("Please create a prospect first.")
-                elif not product:
-                    st.error("Product name is required.")
-                else:
-                    new_quote = {
-                        "id": next_id("Q", [q["id"] for q in quotes]),
-                        "prospect_id": selected_lead["id"],
-                        "customer_name": selected_lead["company_name"],
-                        "product_name": product,
-                        "quote_value": value,
-                        "currency": currency,
-                        "status": quote_status,
-                        "created_date": str(date.today()),
-                        "valid_until": str(valid_until),
-                        "notes": notes,
-                    }
-                    data["quotations"].append(new_quote)
-
-                    for p in data["prospects"]:
-                        if p["id"] == selected_lead["id"] and p["status"] in {"New Lead", "Contacted", "Qualified"}:
-                            p["status"] = "Proposal Sent"
-                            p["updated_at"] = now_stamp()
-                            if not p.get("connected_at"):
-                                p["connected_at"] = today_iso()
-
-                    log_activity(
-                        data,
-                        activity_type="Proposal Shared",
-                        entity_type="prospect",
-                        entity_id=selected_lead["id"],
-                        company_name=selected_lead["company_name"],
-                        details=f"Quotation created for {product}",
-                        product_name=product,
-                        amount=float(value or 0),
-                        status=quote_status,
-                    )
-
+    with records_tab:
+        if quotes:
+            q_df = pd.DataFrame(quotes)
+            if "quote_value" in q_df.columns:
+                q_df["quote_value"] = pd.to_numeric(q_df["quote_value"], errors="coerce").fillna(0.0)
+            q_df_view = q_df.drop(columns=["customer_id"], errors="ignore")
+            render_dynamic_table(
+                q_df_view,
+                "Quotation Register",
+                key="quotations_register",
+                max_rows=90,
+                strict_columns=True,
+            )
+            with st.expander("Edit Quotation Records", expanded=False):
+                edited_quotes = st.data_editor(q_df_view, width="stretch", hide_index=True, num_rows="dynamic")
+                if st.button("Save Quotation Edits", width="stretch"):
+                    if "quote_value" in edited_quotes.columns:
+                        edited_quotes["quote_value"] = pd.to_numeric(edited_quotes["quote_value"], errors="coerce").fillna(0.0)
+                    edited_records = edited_quotes.fillna("").to_dict("records")
+                    existing_customer_ids = {q.get("id", ""): q.get("customer_id", "") for q in data["quotations"]}
+                    for row in edited_records:
+                        row["customer_id"] = existing_customer_ids.get(row.get("id", ""), "")
+                    data["quotations"] = edited_records
                     save_data_and_refresh(data)
+        else:
+            st.info("No quotations created yet.")
 
-    st.markdown("### Upload Existing Quotation PDFs")
-    st.caption("Use this when you already generated quotation PDFs and want to attach them to a lead.")
-    render_attachment_manager(
-        data,
-        prospects,
-        key_prefix="quotations",
-        id_field="id",
-        name_field="company_name",
-        attachments_key="prospect_attachments",
-        entity_type="prospect",
-        track_quote_value=True,
-    )
+        with st.expander("Generate New Quotation", expanded=False):
+            with st.form("new_quote_form", clear_on_submit=True):
+                lead_options = {f"{p['id']} | {p['company_name']} ({p['status']})": p for p in prospects}
+                selected_label = st.selectbox("Prospect", list(lead_options.keys()) if lead_options else ["No prospects available"])
+                selected_lead = lead_options.get(selected_label)
+
+                c1, c2, c3 = st.columns(3)
+                product = c1.text_input("Product Name*")
+                value = c2.number_input("Quotation Value", min_value=0.0, step=1000.0)
+                currency = c3.selectbox("Currency", ["AED", "USD", "EUR", "GBP"])
+
+                d1, d2 = st.columns(2)
+                quote_status = d1.selectbox("Quote Status", QUOTE_STATUSES)
+                valid_until = d2.date_input("Valid Until", value=date.today())
+
+                notes = st.text_area("Commercial Notes")
+                submitted = st.form_submit_button("Create Quotation", width="stretch")
+
+                if submitted:
+                    if not selected_lead:
+                        st.error("Please create a prospect first.")
+                    elif not product:
+                        st.error("Product name is required.")
+                    else:
+                        new_quote = {
+                            "id": next_id("Q", [q["id"] for q in quotes]),
+                            "prospect_id": selected_lead["id"],
+                            "customer_name": selected_lead["company_name"],
+                            "product_name": product,
+                            "quote_value": value,
+                            "currency": currency,
+                            "status": quote_status,
+                            "created_date": str(date.today()),
+                            "valid_until": str(valid_until),
+                            "notes": notes,
+                        }
+                        data["quotations"].append(new_quote)
+
+                        for p in data["prospects"]:
+                            if p["id"] == selected_lead["id"] and p["status"] in {"New Lead", "Contacted", "Qualified"}:
+                                p["status"] = "Proposal Sent"
+                                p["updated_at"] = now_stamp()
+                                if not p.get("connected_at"):
+                                    p["connected_at"] = today_iso()
+
+                        log_activity(
+                            data,
+                            activity_type="Proposal Shared",
+                            entity_type="prospect",
+                            entity_id=selected_lead["id"],
+                            company_name=selected_lead["company_name"],
+                            details=f"Quotation created for {product}",
+                            product_name=product,
+                            amount=float(value or 0),
+                            status=quote_status,
+                        )
+
+                        save_data_and_refresh(data)
+
+    with upload_tab:
+        st.markdown("### Upload Quotation PDFs Against a Lead")
+        st.caption("Choose a lead, upload one or more quotation PDFs, and record quotation value in the same step.")
+        render_attachment_manager(
+            data,
+            prospects,
+            key_prefix="quotations",
+            id_field="id",
+            name_field="company_name",
+            attachments_key="prospect_attachments",
+            entity_type="prospect",
+            track_quote_value=True,
+        )
+
+    with files_tab:
+        st.markdown("### Uploaded Quotation Files")
+        file_rows: list[dict[str, Any]] = []
+        for lead_id, files in attachments.items():
+            lead = lead_map.get(lead_id, {})
+            for fobj in files:
+                file_rows.append(
+                    {
+                        "lead_id": lead_id,
+                        "company_name": lead.get("company_name", "Unknown Lead"),
+                        "file_id": fobj.get("file_id", ""),
+                        "linked_quotation_id": fobj.get("linked_quotation_id", "Unlinked"),
+                        "file_name": fobj.get("file_name", "quotation.pdf"),
+                        "uploaded_at": fobj.get("uploaded_at", ""),
+                        "mime_type": fobj.get("mime_type", "application/pdf"),
+                    }
+                )
+
+        if not file_rows:
+            st.info("No quotation PDFs uploaded yet.")
+        else:
+            files_df = pd.DataFrame(file_rows).sort_values(["uploaded_at", "company_name"], ascending=[False, True])
+            render_dynamic_table(
+                files_df[["company_name", "lead_id", "linked_quotation_id", "file_name", "uploaded_at"]],
+                "Uploaded Quotation Library",
+                key="quotation_files_library",
+                max_rows=120,
+                strict_columns=True,
+            )
+
+            file_lookup: dict[str, tuple[str, str]] = {}
+            file_labels: list[str] = []
+            for row in file_rows:
+                label = f"{row['company_name']} | {row['file_name']} | {row['uploaded_at']}"
+                file_lookup[label] = (row["lead_id"], row["file_id"])
+                file_labels.append(label)
+
+            selected_file_label = st.selectbox("Select uploaded file", file_labels)
+            selected_lead_id, selected_file_id = file_lookup[selected_file_label]
+            selected_files = attachments.get(selected_lead_id, [])
+            selected_file = next((f for f in selected_files if f.get("file_id") == selected_file_id), None)
+
+            if selected_file:
+                d1, d2 = st.columns(2)
+                with d1:
+                    st.download_button(
+                        label=f"Download {selected_file.get('file_name', 'quotation.pdf')}",
+                        data=base64.b64decode(selected_file.get("content_b64", "")),
+                        file_name=selected_file.get("file_name", "quotation.pdf"),
+                        mime=selected_file.get("mime_type", "application/pdf"),
+                        width="stretch",
+                        key=f"quote_lib_download_{selected_file_id}",
+                    )
+                with d2:
+                    if st.button("Delete Selected File", width="stretch", key=f"quote_lib_delete_{selected_file_id}"):
+                        attachments[selected_lead_id] = [f for f in selected_files if f.get("file_id") != selected_file_id]
+                        if not attachments[selected_lead_id]:
+                            attachments.pop(selected_lead_id, None)
+                        lead_name = lead_map.get(selected_lead_id, {}).get("company_name", "Unknown Lead")
+                        log_activity(
+                            data,
+                            activity_type="Quotation PDF Deleted",
+                            entity_type="prospect",
+                            entity_id=selected_lead_id,
+                            company_name=lead_name,
+                            details=f"Deleted file {selected_file.get('file_name', 'quotation.pdf')}",
+                        )
+                        save_data_and_refresh(data)
 
 
 def purchase_orders_view(data: dict[str, Any]) -> None:
-    st.subheader("Purchase Orders")
+    render_workspace_hero(
+        "Workspace",
+        "Purchase Orders",
+        "Capture confirmed business, reconcile PO status, and maintain auditable order documentation.",
+    )
     prospects = data.get("prospects", [])
     purchase_orders = data.get("purchase_orders", [])
 
@@ -1267,7 +2294,7 @@ def purchase_orders_view(data: dict[str, Any]) -> None:
             for c in ["id", "po_number", "prospect_id", "company_name", "po_value", "currency", "po_date", "status", "file_name"]
             if c in po_df.columns
         ]
-        st.dataframe(po_df[show_cols], width="stretch", hide_index=True)
+        render_dynamic_table(po_df[show_cols], "PO Register", key="po_register", max_rows=100)
     else:
         st.info("No purchase orders yet. Upload the first PO below.")
 
@@ -1358,8 +2385,11 @@ def purchase_orders_view(data: dict[str, Any]) -> None:
 
 
 def pipeline_view(data: dict[str, list[dict[str, Any]]]) -> None:
-    st.subheader("Dynamic Sales Pipeline")
-    st.caption("Move opportunities between stages and track quote/product/value context.")
+    render_workspace_hero(
+        "Workspace",
+        "Dynamic Sales Pipeline",
+        "Move opportunities between stages in real time while preserving quote, product, and value context.",
+    )
 
     prospects = data["prospects"]
     quotes_map = latest_quote_map(data["quotations"])
@@ -1395,54 +2425,247 @@ def pipeline_view(data: dict[str, list[dict[str, Any]]]) -> None:
                 break
         save_data_and_refresh(data)
 
-    cols = st.columns(len(STATUSES))
-    for idx, status in enumerate(STATUSES):
-        with cols[idx]:
-            st.markdown(f"### {status}")
-            status_items = [p for p in prospects if p["status"] == status]
-            if not status_items:
-                st.caption("No records")
+    status_items_map = {status: [p for p in prospects if p.get("status") == status] for status in STATUSES}
+    stage_badge_map = {
+        "Qualified": "badge-qualified",
+        "Proposal Sent": "badge-proposal",
+        "Negotiation": "badge-negotiation",
+    }
 
-            for lead in status_items:
-                quote = quotes_map.get(lead["id"])
-                quote_line = (
-                    f"Quote: {quote.get('currency', 'AED')} {float(quote.get('quote_value', 0)):,.0f} | {quote.get('product_name', '')}"
-                    if quote
-                    else "Quote: Not generated"
-                )
+    def heat_class_for_value(value: float) -> str:
+        if value >= 300000:
+            return "heat-hot"
+        if value >= 120000:
+            return "heat-warm"
+        return "heat-cool"
+    st.markdown(
+        "<div class='status-strip'>" + "".join(
+            f"<div class='status-pill'><span class='label'>{html.escape(status)}</span><span class='value'>{len(status_items_map.get(status, []))}</span></div>"
+            for status in STATUSES
+        ) + "</div>",
+        unsafe_allow_html=True,
+    )
 
-                st.markdown(
-                    f"""
-                    <div class='pipeline-card'>
-                        <div class='pipeline-title'>{lead['company_name']}</div>
-                        <div>{lead['contact_name']}</div>
-                        <div class='mono'>{lead['id']} | Est. AED {float(lead.get('estimated_value', 0)):,.0f}</div>
-                        <div class='mono'>{quote_line}</div>
-                        <div class='mono'>Product: {lead.get('product_interest', '')}</div>
-                    </div>
-                    """,
-                    unsafe_allow_html=True,
-                )
+    def render_lane(status: str, focus_class: str = "") -> None:
+        items = status_items_map.get(status, [])
+        lane_class = f"pipeline-lane {focus_class}".strip()
+        st.markdown(
+            f"""
+            <div class='{lane_class}'>
+                <div class='pipeline-lane-head'>
+                    <div class='pipeline-lane-title'>{html.escape(status)}</div>
+                    <div class='pipeline-count'>{len(items)} leads</div>
+                </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        if not items:
+            st.markdown("<div class='pipeline-empty'>No opportunities in this stage.</div>", unsafe_allow_html=True)
+        for lead in items:
+            quote = quotes_map.get(lead["id"])
+            quote_line = (
+                f"Quote: {quote.get('currency', 'AED')} {float(quote.get('quote_value', 0) or 0):,.0f} | {quote.get('product_name', '')}"
+                if quote
+                else "Quote: Not generated"
+            )
+            company = html.escape(str(lead.get("company_name", "")))
+            contact = html.escape(str(lead.get("contact_name", "")))
+            lead_id = html.escape(str(lead.get("id", "")))
+            est_value = float(lead.get("estimated_value", 0) or 0)
+            product = html.escape(str(lead.get("product_interest", "")))
+            next_action = html.escape(str(lead.get("next_action", "Not set") or "Not set"))
+            quote_line_safe = html.escape(quote_line)
+            heat_class = heat_class_for_value(est_value)
+            badge_class = stage_badge_map.get(status, "")
+            badge_html = f"<div class='pipeline-badge {badge_class}'>{html.escape(status)}</div>" if badge_class else ""
+            st.markdown(
+                f"""
+                <div class='pipeline-card {heat_class}'>
+                    {badge_html}
+                    <div class='pipeline-title'>{company}</div>
+                    <div>{contact}</div>
+                    <div class='mono'>{lead_id} | Est. AED {est_value:,.0f}</div>
+                    <div class='mono'>{quote_line_safe}</div>
+                    <div class='mono'>Product: {product}</div>
+                    <div class='mono'>Next: {next_action}</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    st.markdown("### Conversion Focus")
+    focus_left, focus_right = st.columns(2)
+    with focus_left:
+        render_lane("Qualified", "focus-qualified")
+    with focus_right:
+        render_lane("Proposal Sent", "focus-proposal")
+
+    st.markdown("### Full Pipeline")
+    remaining_statuses = [s for s in STATUSES if s not in {"Qualified", "Proposal Sent"}]
+    row_size = 3
+    for i in range(0, len(remaining_statuses), row_size):
+        row_statuses = remaining_statuses[i : i + row_size]
+        row_cols = st.columns(len(row_statuses))
+        for col, status in zip(row_cols, row_statuses):
+            with col:
+                render_lane(status)
 
 
 def insights_view(data: dict[str, list[dict[str, Any]]]) -> None:
-    st.subheader("Revenue and Product Insights")
+    render_workspace_hero(
+        "Workspace",
+        "Revenue and Product Insights",
+        "Monitor performance momentum through executive analytics and product-level value concentration.",
+    )
     prospects = pd.DataFrame(data["prospects"])
     quotes = pd.DataFrame(data["quotations"])
 
-    if not prospects.empty:
-        st.write("Pipeline value by product interest")
-        product_value = prospects.groupby("product_interest", dropna=False)["estimated_value"].sum().sort_values(ascending=False)
-        st.bar_chart(product_value)
-    else:
-        st.info("Prospects required for insights.")
+    if not prospects.empty and "estimated_value" in prospects.columns:
+        prospects["estimated_value"] = pd.to_numeric(prospects["estimated_value"], errors="coerce").fillna(0.0)
+    if not quotes.empty and "quote_value" in quotes.columns:
+        quotes["quote_value"] = pd.to_numeric(quotes["quote_value"], errors="coerce").fillna(0.0)
 
-    if not quotes.empty:
-        st.write("Quotation value by quote status")
-        quote_status = quotes.groupby("status", dropna=False)["quote_value"].sum().sort_values(ascending=False)
-        st.bar_chart(quote_status)
+    total_pipeline = float(prospects["estimated_value"].sum()) if not prospects.empty and "estimated_value" in prospects.columns else 0.0
+    total_quoted = float(quotes["quote_value"].sum()) if not quotes.empty and "quote_value" in quotes.columns else 0.0
+    avg_quote = float(quotes["quote_value"].mean()) if not quotes.empty and "quote_value" in quotes.columns else 0.0
+    active_leads = int(prospects[prospects["status"].isin(CONNECTED_STATUSES)].shape[0]) if not prospects.empty and "status" in prospects.columns else 0
+
+    st.markdown(
+        """
+        <div class='report-hero'>
+            <h3>Commercial Intelligence Snapshot</h3>
+            <p>Premium analytics view of where value is building, which product lines are strongest, and how quotation momentum is moving by stage.</p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    k1, k2, k3, k4 = st.columns(4)
+    k1.metric("Pipeline Value", f"AED {total_pipeline:,.0f}")
+    k2.metric("Quotation Value", f"AED {total_quoted:,.0f}")
+    k3.metric("Average Quote", f"AED {avg_quote:,.0f}")
+    k4.metric("Active Leads", active_leads)
+
+    left, right = st.columns(2)
+
+    with left:
+        st.markdown("#### Pipeline by Product Interest")
+        if prospects.empty:
+            st.info("Prospects required for insights.")
+        else:
+            product_df = prospects.copy()
+            product_df["product_interest"] = product_df.get("product_interest", "").replace("", "Unspecified").fillna("Unspecified")
+            product_value = (
+                product_df.groupby("product_interest", dropna=False)["estimated_value"]
+                .sum()
+                .sort_values(ascending=False)
+                .head(8)
+                .reset_index(name="value")
+            )
+            max_product = max(float(product_value["value"].max()) if not product_value.empty else 0.0, 1.0)
+            product_chart = (
+                alt.Chart(product_value)
+                .mark_bar(cornerRadiusTopRight=8, cornerRadiusBottomRight=8, size=20)
+                .encode(
+                    y=alt.Y("product_interest:N", sort="-x", title=None, axis=alt.Axis(labelLimit=200)),
+                    x=alt.X("value:Q", title="AED", scale=alt.Scale(domain=[0, max_product])),
+                    color=alt.Color(
+                        "value:Q",
+                        scale=alt.Scale(domain=[0, max_product], range=["#bae6fd", "#0ea5a4"]),
+                        legend=None,
+                    ),
+                    tooltip=[
+                        alt.Tooltip("product_interest:N", title="Product"),
+                        alt.Tooltip("value:Q", title="Pipeline Value", format=",.0f"),
+                    ],
+                )
+                .properties(height=280)
+            )
+            product_labels = (
+                alt.Chart(product_value)
+                .mark_text(align="left", dx=6, color="#13202a", fontWeight=700)
+                .encode(y=alt.Y("product_interest:N", sort="-x"), x="value:Q", text=alt.Text("value:Q", format=",.0f"))
+            )
+            st.altair_chart(product_chart + product_labels, use_container_width=True)
+
+    with right:
+        st.markdown("#### Quotation Value by Status")
+        if quotes.empty:
+            st.info("Quotations required for quote insights.")
+        else:
+            quote_df = quotes.copy()
+            quote_df["status"] = quote_df.get("status", "Draft").fillna("Draft")
+            quote_status = (
+                quote_df.groupby("status", dropna=False)["quote_value"]
+                .sum()
+                .sort_values(ascending=False)
+                .reset_index(name="value")
+            )
+            max_quote = max(float(quote_status["value"].max()) if not quote_status.empty else 0.0, 1.0)
+            status_chart = (
+                alt.Chart(quote_status)
+                .mark_bar(cornerRadiusTopLeft=10, cornerRadiusTopRight=10, size=44)
+                .encode(
+                    x=alt.X("status:N", title=None, axis=alt.Axis(labelAngle=0)),
+                    y=alt.Y("value:Q", title="AED", scale=alt.Scale(domain=[0, max_quote])),
+                    color=alt.Color(
+                        "status:N",
+                        legend=None,
+                        scale=alt.Scale(
+                            domain=["Accepted", "Sent", "Draft", "Rejected"],
+                            range=["#16a34a", "#0ea5a4", "#38bdf8", "#f97316"],
+                        ),
+                    ),
+                    tooltip=[
+                        alt.Tooltip("status:N", title="Status"),
+                        alt.Tooltip("value:Q", title="Quotation Value", format=",.0f"),
+                    ],
+                )
+                .properties(height=280)
+            )
+            status_labels = (
+                alt.Chart(quote_status)
+                .mark_text(dy=-10, fontWeight=700, color="#13202a")
+                .encode(x="status:N", y="value:Q", text=alt.Text("value:Q", format=",.0f"))
+            )
+            st.altair_chart(status_chart + status_labels, use_container_width=True)
+
+    stage_counts = pd.DataFrame()
+    if not prospects.empty and "status" in prospects.columns:
+        stage_counts = (
+            prospects.groupby("status", dropna=False)
+            .size()
+            .rename("count")
+            .reindex(STATUSES, fill_value=0)
+            .reset_index()
+        )
+
+    st.markdown("#### Stage Distribution")
+    if stage_counts.empty:
+        st.info("No stage data available yet.")
     else:
-        st.info("Quotations required for quote insights.")
+        stage_max = max(int(stage_counts["count"].max()) if not stage_counts.empty else 0, 1)
+        stage_chart = (
+            alt.Chart(stage_counts)
+            .mark_bar(cornerRadiusTopLeft=8, cornerRadiusTopRight=8, size=26)
+            .encode(
+                x=alt.X("status:N", sort=STATUSES, title=None, axis=alt.Axis(labelAngle=0, labelLimit=120)),
+                y=alt.Y("count:Q", title="Lead Count", scale=alt.Scale(domain=[0, stage_max])),
+                color=alt.Color(
+                    "status:N",
+                    sort=STATUSES,
+                    legend=None,
+                    scale=alt.Scale(range=["#0ea5a4", "#38bdf8", "#22c55e", "#facc15", "#f97316", "#14b8a6", "#64748b"]),
+                ),
+                tooltip=[alt.Tooltip("status:N", title="Stage"), alt.Tooltip("count:Q", title="Leads")],
+            )
+            .properties(height=220)
+        )
+        stage_labels = alt.Chart(stage_counts).mark_text(dy=-9, color="#13202a", fontWeight=700).encode(
+            x=alt.X("status:N", sort=STATUSES), y="count:Q", text="count:Q"
+        )
+        st.altair_chart(stage_chart + stage_labels, use_container_width=True)
 
 
 def render_period_report(data: dict[str, Any], start: date, end: date, label: str, combined_view: bool = False) -> None:
@@ -1587,7 +2810,7 @@ def render_period_report(data: dict[str, Any], start: date, end: date, label: st
                 connected_view = connected_df[
                     ["id", "company_name", "contact_name", "status", "connected_at", "next_action", "estimated_value"]
                 ]
-                st.dataframe(connected_view, width="stretch", hide_index=True)
+                render_dynamic_table(connected_view, "Connected Leads", key=f"{label}_connected_left", max_rows=100)
                 st.download_button(
                     "Download Connected Leads CSV",
                     data=csv_bytes(connected_view),
@@ -1599,7 +2822,7 @@ def render_period_report(data: dict[str, Any], start: date, end: date, label: st
             if next_steps_df.empty:
                 st.info("No next-step records available for proposals in this period.")
             else:
-                st.dataframe(next_steps_df, width="stretch", hide_index=True)
+                render_dynamic_table(next_steps_df, "Proposal Next Steps", key=f"{label}_nextsteps_left", max_rows=100)
                 st.download_button(
                     "Download Next Steps CSV",
                     data=csv_bytes(next_steps_df),
@@ -1614,7 +2837,7 @@ def render_period_report(data: dict[str, Any], start: date, end: date, label: st
                 activities_view = activities_df[
                     ["activity_id", "activity_type", "company_name", "details", "product_name", "amount", "activity_date", "status"]
                 ]
-                st.dataframe(activities_view, width="stretch", hide_index=True)
+                render_dynamic_table(activities_view, "Activities Completed", key=f"{label}_activities_left", max_rows=100)
                 st.download_button(
                     "Download Activities CSV",
                     data=csv_bytes(activities_view),
@@ -1630,7 +2853,7 @@ def render_period_report(data: dict[str, Any], start: date, end: date, label: st
                 proposal_view = proposals_df[
                     ["id", "prospect_id", "customer_name", "product_name", "quote_value", "status", "created_date"]
                 ]
-                st.dataframe(proposal_view, width="stretch", hide_index=True)
+                render_dynamic_table(proposal_view, "Proposals Shared", key=f"{label}_proposals_right", max_rows=100)
                 st.download_button(
                     "Download Proposals CSV",
                     data=csv_bytes(proposal_view),
@@ -1643,7 +2866,7 @@ def render_period_report(data: dict[str, Any], start: date, end: date, label: st
                 st.info("No prospect updates in this period.")
             else:
                 updates_view = updates_df[["id", "company_name", "status", "updated_at", "next_action", "notes"]]
-                st.dataframe(updates_view, width="stretch", hide_index=True)
+                render_dynamic_table(updates_view, "Latest Prospect Updates", key=f"{label}_updates_right", max_rows=100)
                 st.download_button(
                     "Download Prospect Updates CSV",
                     data=csv_bytes(updates_view),
@@ -1655,7 +2878,7 @@ def render_period_report(data: dict[str, Any], start: date, end: date, label: st
             if won_detail_df.empty:
                 st.info("No projects marked as Won in this period.")
             else:
-                st.dataframe(won_detail_df, width="stretch", hide_index=True)
+                render_dynamic_table(won_detail_df, "Won Projects", key=f"{label}_won_right", max_rows=100)
                 st.download_button(
                     "Download Won Projects CSV",
                     data=csv_bytes(won_detail_df),
@@ -1670,7 +2893,7 @@ def render_period_report(data: dict[str, Any], start: date, end: date, label: st
             connected_view = connected_df[
                 ["id", "company_name", "contact_name", "status", "connected_at", "next_action", "estimated_value"]
             ]
-            st.dataframe(connected_view, width="stretch", hide_index=True)
+            render_dynamic_table(connected_view, "Connected Leads", key=f"{label}_connected", max_rows=120)
             st.download_button(
                 "Download Connected Leads CSV",
                 data=csv_bytes(connected_view),
@@ -1685,7 +2908,7 @@ def render_period_report(data: dict[str, Any], start: date, end: date, label: st
             proposal_view = proposals_df[
                 ["id", "prospect_id", "customer_name", "product_name", "quote_value", "status", "created_date"]
             ]
-            st.dataframe(proposal_view, width="stretch", hide_index=True)
+            render_dynamic_table(proposal_view, "Proposals Shared", key=f"{label}_proposals", max_rows=120)
             st.download_button(
                 "Download Proposals CSV",
                 data=csv_bytes(proposal_view),
@@ -1697,7 +2920,7 @@ def render_period_report(data: dict[str, Any], start: date, end: date, label: st
         if next_steps_df.empty:
             st.info("No next-step records available for proposals in this period.")
         else:
-            st.dataframe(next_steps_df, width="stretch", hide_index=True)
+            render_dynamic_table(next_steps_df, "Proposal Next Steps", key=f"{label}_nextsteps", max_rows=120)
             st.download_button(
                 "Download Next Steps CSV",
                 data=csv_bytes(next_steps_df),
@@ -1710,7 +2933,7 @@ def render_period_report(data: dict[str, Any], start: date, end: date, label: st
             st.info("No prospect updates in this period.")
         else:
             updates_view = updates_df[["id", "company_name", "status", "updated_at", "next_action", "notes"]]
-            st.dataframe(updates_view, width="stretch", hide_index=True)
+            render_dynamic_table(updates_view, "Latest Prospect Updates", key=f"{label}_updates", max_rows=120)
             st.download_button(
                 "Download Prospect Updates CSV",
                 data=csv_bytes(updates_view),
@@ -1725,7 +2948,7 @@ def render_period_report(data: dict[str, Any], start: date, end: date, label: st
             activities_view = activities_df[
                 ["activity_id", "activity_type", "company_name", "details", "product_name", "amount", "activity_date", "status"]
             ]
-            st.dataframe(activities_view, width="stretch", hide_index=True)
+            render_dynamic_table(activities_view, "Activities Completed", key=f"{label}_activities", max_rows=120)
             st.download_button(
                 "Download Activities CSV",
                 data=csv_bytes(activities_view),
@@ -1737,7 +2960,7 @@ def render_period_report(data: dict[str, Any], start: date, end: date, label: st
         if won_detail_df.empty:
             st.info("No projects marked as Won in this period.")
         else:
-            st.dataframe(won_detail_df, width="stretch", hide_index=True)
+            render_dynamic_table(won_detail_df, "Won Projects", key=f"{label}_won", max_rows=120)
             st.download_button(
                 "Download Won Projects CSV",
                 data=csv_bytes(won_detail_df),
@@ -1793,6 +3016,633 @@ def save_report_bundle_and_refresh(
     )
 
 
+def _pdf_text_block(c: Any, text: str, x: float, y: float, width: float, leading: float = 14) -> float:
+    words = text.split()
+    line = ""
+    current_y = y
+    for word in words:
+        candidate = f"{line} {word}".strip()
+        if c.stringWidth(candidate, "Helvetica", 10) <= width:
+            line = candidate
+        else:
+            c.drawString(x, current_y, line)
+            current_y -= leading
+            line = word
+    if line:
+        c.drawString(x, current_y, line)
+        current_y -= leading
+    return current_y
+
+def _resolve_logo_path() -> Path | None:
+    for path in [COMPANY_LOGO_SOURCE, COMPANY_LOGO_FALLBACK]:
+        if path.exists():
+            return path
+    return None
+
+
+def _draw_pdf_bar_chart(
+    c: Any,
+    *,
+    title: str,
+    labels: list[str],
+    values: list[float],
+    x: float,
+    y: float,
+    width: float,
+    height: float,
+    bar_color: str,
+    value_prefix: str = "",
+) -> None:
+    from reportlab.lib import colors
+
+    c.setFillColor(colors.HexColor("#eef7ff"))
+    c.roundRect(x, y, width, height, 10, fill=1, stroke=0)
+    c.setStrokeColor(colors.HexColor("#c9e2f3"))
+    c.roundRect(x, y, width, height, 10, fill=0, stroke=1)
+
+    c.setFillColor(colors.HexColor("#0f2940"))
+    c.setFont("Helvetica-Bold", 10)
+    c.drawString(x + 10, y + height - 16, title)
+
+    if not labels or not values:
+        c.setFillColor(colors.HexColor("#64748b"))
+        c.setFont("Helvetica", 9)
+        c.drawString(x + 10, y + height / 2, "No data for selected period")
+        return
+
+    chart_x = x + 10
+    chart_y = y + 22
+    chart_w = width - 20
+    chart_h = height - 44
+
+    c.setStrokeColor(colors.HexColor("#b9d7ea"))
+    c.line(chart_x, chart_y, chart_x, chart_y + chart_h)
+    c.line(chart_x, chart_y, chart_x + chart_w, chart_y)
+
+    max_val = max(values) if values else 0
+    if max_val <= 0:
+        max_val = 1
+
+    bar_count = len(values)
+    slot_w = chart_w / max(1, bar_count)
+    bar_w = max(8, slot_w * 0.55)
+
+    for i, value in enumerate(values):
+        bh = (value / max_val) * (chart_h - 8)
+        bx = chart_x + i * slot_w + (slot_w - bar_w) / 2
+        by = chart_y
+
+        c.setFillColor(colors.HexColor(bar_color))
+        c.roundRect(bx, by, bar_w, bh, 3, fill=1, stroke=0)
+
+        c.setFillColor(colors.HexColor("#0b2235"))
+        c.setFont("Helvetica", 7)
+        c.drawCentredString(bx + bar_w / 2, chart_y - 10, labels[i][:6])
+
+        c.setFillColor(colors.HexColor("#334155"))
+        c.setFont("Helvetica", 7)
+        value_text = f"{value_prefix}{value:,.0f}" if value >= 100 else f"{value_prefix}{value:.0f}"
+        c.drawCentredString(bx + bar_w / 2, by + bh + 3, value_text)
+
+
+def save_weekly_executive_pdf_to_downloads(data: dict[str, Any], start: date, end: date) -> Path:
+    try:
+        from reportlab.lib import colors
+        from reportlab.lib.pagesizes import A4
+        from reportlab.pdfgen import canvas
+    except Exception as exc:
+        raise RuntimeError("reportlab is required. Install with: pip install reportlab") from exc
+
+    prospects = data.get("prospects", [])
+    quotations = data.get("quotations", [])
+    purchase_orders = data.get("purchase_orders", [])
+    activities = data.get("activity_log", [])
+
+    weekly_new_prospects = [p for p in prospects if date_in_range(p.get("created_at", ""), start, end)]
+    weekly_quotes = [q for q in quotations if date_in_range(q.get("created_date", ""), start, end)]
+    weekly_pos = [po for po in purchase_orders if date_in_range(po.get("po_date", ""), start, end)]
+    weekly_activities = [a for a in activities if date_in_range(a.get("activity_date", ""), start, end)]
+
+    quote_total = sum(float(q.get("quote_value", 0) or 0) for q in weekly_quotes)
+    po_total = sum(float(po.get("po_value", 0) or 0) for po in weekly_pos)
+    prospect_est_total = sum(float(p.get("estimated_value", 0) or 0) for p in weekly_new_prospects)
+
+    status_counts: dict[str, int] = {}
+    for p in weekly_new_prospects:
+        status = p.get("status", "New Lead")
+        status_counts[status] = status_counts.get(status, 0) + 1
+
+    quote_status_counts: dict[str, int] = {}
+    for q in weekly_quotes:
+        status = q.get("status", "Draft")
+        quote_status_counts[status] = quote_status_counts.get(status, 0) + 1
+
+    total_days = max((end - start).days + 1, 1)
+    days = [start + timedelta(days=i) for i in range(total_days)]
+    day_labels = [d.strftime("%a") for d in days]
+    quote_value_by_day: list[float] = []
+    prospect_count_by_day: list[float] = []
+    for d in days:
+        q_day = [q for q in weekly_quotes if safe_parse_date(q.get("created_date", "")) == d]
+        p_day = [p for p in weekly_new_prospects if safe_parse_date(p.get("created_at", "")) == d]
+        quote_value_by_day.append(sum(float(q.get("quote_value", 0) or 0) for q in q_day))
+        prospect_count_by_day.append(float(len(p_day)))
+
+    top_status = sorted(status_counts.items(), key=lambda x: x[1], reverse=True)
+    top_quote_status = sorted(quote_status_counts.items(), key=lambda x: x[1], reverse=True)
+    top_status_text = ", ".join(f"{k}: {v}" for k, v in top_status[:4]) if top_status else "No stage movement yet"
+    top_quote_text = ", ".join(f"{k}: {v}" for k, v in top_quote_status[:4]) if top_quote_status else "No quote status movement yet"
+
+    report_dir = DOWNLOADS_DIR / "crm_reports"
+    report_dir.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    period_label = f"{start.isoformat()}_to_{end.isoformat()}"
+    out_path = report_dir / f"weekly_executive_report_{period_label}_{stamp}.pdf"
+
+    c = canvas.Canvas(str(out_path), pagesize=A4)
+    page_w, page_h = A4
+
+    c.setFillColor(colors.HexColor("#edf7fb"))
+    c.rect(0, page_h - 136, page_w, 136, fill=1, stroke=0)
+    c.setFillColor(colors.HexColor("#9bdaf0"))
+    c.rect(0, page_h - 144, page_w, 8, fill=1, stroke=0)
+    c.setFillColor(colors.HexColor("#fbbf24"))
+    c.rect(0, page_h - 150, page_w, 6, fill=1, stroke=0)
+    c.setStrokeColor(colors.HexColor("#c7e6f2"))
+    c.line(0, page_h - 136, page_w, page_h - 136)
+
+    c.setFillColor(colors.HexColor("#0f2940"))
+    c.setFont("Helvetica-Bold", 22)
+    c.drawString(34, page_h - 56, "Metalys Enclosures Manufacturing")
+    c.setFont("Helvetica-Bold", 12)
+    c.drawString(34, page_h - 78, "Weekly Executive CRM Intelligence Report")
+    c.setFont("Helvetica", 11)
+    c.drawString(34, page_h - 96, f"Date Frame: {start} to {end}")
+    c.setFillColor(colors.HexColor("#1d4f68"))
+    c.setFont("Helvetica-Bold", 9)
+    c.drawString(34, page_h - 114, "PREMIUM ANALYTICS VIEW")
+
+    logo_path = _resolve_logo_path()
+    if logo_path:
+        try:
+            c.drawImage(
+                str(logo_path),
+                page_w - 170,
+                page_h - 118,
+                width=130,
+                height=84,
+                mask="auto",
+                preserveAspectRatio=True,
+            )
+        except Exception:
+            pass
+
+    card_y = page_h - 244
+    card_w = (page_w - 34 * 2 - 24) / 4
+    card_h = 76
+    cards = [
+        ("New Prospects", str(len(weekly_new_prospects)), "Weekly lead creation", "#dbeafe"),
+        ("Quote Value", f"AED {quote_total:,.0f}", f"{len(weekly_quotes)} quotations", "#cffafe"),
+        ("PO Value", f"AED {po_total:,.0f}", f"{len(weekly_pos)} purchase orders", "#dcfce7"),
+        ("Pipeline Added", f"AED {prospect_est_total:,.0f}", "Estimated potential", "#ffedd5"),
+    ]
+    for i, (title, value, note, shade) in enumerate(cards):
+        x = 34 + i * (card_w + 8)
+        c.setFillColor(colors.HexColor(shade))
+        c.roundRect(x, card_y, card_w, card_h, 10, fill=1, stroke=0)
+        c.setStrokeColor(colors.HexColor("#d3e4f3"))
+        c.roundRect(x, card_y, card_w, card_h, 10, fill=0, stroke=1)
+        c.setFillColor(colors.HexColor("#334155"))
+        c.setFont("Helvetica", 8)
+        c.drawCentredString(x + card_w / 2, card_y + 58, title.upper())
+        c.setFillColor(colors.HexColor("#0b2235"))
+        c.setFont("Helvetica-Bold", 13)
+        c.drawCentredString(x + card_w / 2, card_y + 38, value)
+        c.setFillColor(colors.HexColor("#475569"))
+        c.setFont("Helvetica", 8)
+        c.drawCentredString(x + card_w / 2, card_y + 18, note)
+
+    insight_box_y = card_y - 66
+    c.setFillColor(colors.HexColor("#f8fafc"))
+    c.roundRect(34, insight_box_y, page_w - 68, 56, 10, fill=1, stroke=0)
+    c.setStrokeColor(colors.HexColor("#dbe7f2"))
+    c.roundRect(34, insight_box_y, page_w - 68, 56, 10, fill=0, stroke=1)
+    c.setFillColor(colors.HexColor("#0f2940"))
+    c.setFont("Helvetica-Bold", 10)
+    c.drawString(44, insight_box_y + 42, "Executive Narrative")
+    c.setFillColor(colors.HexColor("#334155"))
+    c.setFont("Helvetica", 9)
+    insight = (
+        f"Pipeline acceleration this week: {len(weekly_new_prospects)} new prospects and AED {quote_total:,.0f} in quotations. "
+        f"Sales stage trend: {top_status_text}. Quotation trend: {top_quote_text}."
+    )
+    _pdf_text_block(c, insight, 44, insight_box_y + 26, page_w - 88, leading=11)
+
+    chart_y = insight_box_y - 190
+    chart_w = (page_w - 80) / 2
+    _draw_pdf_bar_chart(
+        c,
+        title="Daily Quotation Value",
+        labels=day_labels,
+        values=quote_value_by_day,
+        x=34,
+        y=chart_y,
+        width=chart_w,
+        height=176,
+        bar_color="#0ea5a4",
+        value_prefix="",
+    )
+    _draw_pdf_bar_chart(
+        c,
+        title="Daily New Prospects",
+        labels=day_labels,
+        values=prospect_count_by_day,
+        x=44 + chart_w,
+        y=chart_y,
+        width=chart_w,
+        height=176,
+        bar_color="#f97316",
+        value_prefix="",
+    )
+
+    c.setFillColor(colors.HexColor("#0f2940"))
+    c.setFont("Helvetica-Bold", 10)
+    c.drawString(34, chart_y - 12, "Strategic Highlights")
+    c.setFillColor(colors.HexColor("#334155"))
+    c.setFont("Helvetica", 9)
+    highlights = [
+        f"Quotation to PO ratio (value): {((po_total / quote_total) * 100):.1f}%" if quote_total > 0 else "Quotation to PO ratio: not enough quote value data",
+        f"Most active prospect stage this week: {top_status[0][0]} ({top_status[0][1]})" if top_status else "No stage transitions captured this week",
+        f"Most common quotation status: {top_quote_status[0][0]} ({top_quote_status[0][1]})" if top_quote_status else "No quotations created this week",
+    ]
+    hy = chart_y - 24
+    for item in highlights:
+        c.drawString(36, hy, f"- {item}"[:132])
+        hy -= 12
+
+    # Always show weekly company and quotation detail snapshots on the main page.
+    detail_box_y = 108
+    detail_box_h = 152
+    detail_box_w = (page_w - 80) / 2
+
+    left_box_x = 34
+    right_box_x = 44 + detail_box_w
+
+    c.setFillColor(colors.HexColor("#f8fafc"))
+    c.roundRect(left_box_x, detail_box_y, detail_box_w, detail_box_h, 10, fill=1, stroke=0)
+    c.roundRect(right_box_x, detail_box_y, detail_box_w, detail_box_h, 10, fill=1, stroke=0)
+    c.setStrokeColor(colors.HexColor("#dbe7f2"))
+    c.roundRect(left_box_x, detail_box_y, detail_box_w, detail_box_h, 10, fill=0, stroke=1)
+    c.roundRect(right_box_x, detail_box_y, detail_box_w, detail_box_h, 10, fill=0, stroke=1)
+
+    c.setFillColor(colors.HexColor("#0f2940"))
+    c.setFont("Helvetica-Bold", 10)
+    c.drawString(left_box_x + 10, detail_box_y + detail_box_h - 16, "New Companies Added This Week")
+    c.drawString(right_box_x + 10, detail_box_y + detail_box_h - 16, "Quotation Details by Company")
+
+    c.setFillColor(colors.HexColor("#334155"))
+    c.setFont("Helvetica", 8)
+    left_y = detail_box_y + detail_box_h - 32
+    if weekly_new_prospects:
+        for prospect in weekly_new_prospects[:8]:
+            line = (
+                f"- {prospect.get('company_name', 'Unknown')} | "
+                f"{prospect.get('status', 'New Lead')} | AED {float(prospect.get('estimated_value', 0) or 0):,.0f}"
+            )
+            c.drawString(left_box_x + 10, left_y, line[:62])
+            left_y -= 12
+    else:
+        c.drawString(left_box_x + 10, left_y, "- No new companies added in this week")
+
+    right_y = detail_box_y + detail_box_h - 32
+    if weekly_quotes:
+        for quote in weekly_quotes[:8]:
+            line = (
+                f"- {quote.get('customer_name', 'Unknown')} | {quote.get('product_name', '')} | "
+                f"{quote.get('currency', 'AED')} {float(quote.get('quote_value', 0) or 0):,.0f}"
+            )
+            c.drawString(right_box_x + 10, right_y, line[:62])
+            right_y -= 12
+    else:
+        c.drawString(right_box_x + 10, right_y, "- No quotation details in this week")
+
+    c.setFillColor(colors.HexColor("#64748b"))
+    c.setFont("Helvetica", 8)
+    c.drawString(34, 18, f"Generated on {now_stamp()} | Source: Sales CRM Dashboard")
+
+    detail_rows = min(len(weekly_new_prospects), 14) + min(len(weekly_quotes), 14) + min(len(weekly_pos), 12)
+    if detail_rows > 16:
+        c.showPage()
+
+        c.setFillColor(colors.HexColor("#082f49"))
+        c.rect(0, page_h - 58, page_w, 58, fill=1, stroke=0)
+        c.setFillColor(colors.white)
+        c.setFont("Helvetica-Bold", 14)
+        c.drawString(34, page_h - 36, "Pipeline Detail Appendix")
+
+        c.setFillColor(colors.HexColor("#0f2940"))
+        c.setFont("Helvetica-Bold", 11)
+        c.drawString(34, page_h - 82, "Top New Prospects")
+        c.setFillColor(colors.HexColor("#1f2937"))
+        c.setFont("Helvetica", 9)
+        y = page_h - 98
+        if weekly_new_prospects:
+            for p in weekly_new_prospects[:14]:
+                line = (
+                    f"- {p.get('company_name', 'Unknown')} | {p.get('status', 'New Lead')} | "
+                    f"Potential AED {float(p.get('estimated_value', 0) or 0):,.0f}"
+                )
+                c.drawString(36, y, line[:132])
+                y -= 12
+        else:
+            c.drawString(36, y, "- No new prospects added in this week")
+            y -= 12
+
+        c.setFillColor(colors.HexColor("#0f2940"))
+        c.setFont("Helvetica-Bold", 11)
+        c.drawString(34, y - 8, "Latest Quotations")
+        c.setFillColor(colors.HexColor("#1f2937"))
+        c.setFont("Helvetica", 9)
+        y -= 24
+        if weekly_quotes:
+            for q in weekly_quotes[:14]:
+                line = (
+                    f"- {q.get('customer_name', 'Unknown')} | {q.get('product_name', '')} | "
+                    f"{q.get('currency', 'AED')} {float(q.get('quote_value', 0) or 0):,.0f} | {q.get('status', 'Draft')}"
+                )
+                c.drawString(36, y, line[:132])
+                y -= 12
+        else:
+            c.drawString(36, y, "- No quotations issued in this week")
+            y -= 12
+
+        c.setFillColor(colors.HexColor("#0f2940"))
+        c.setFont("Helvetica-Bold", 11)
+        c.drawString(34, y - 8, "Latest Purchase Orders")
+        c.setFillColor(colors.HexColor("#1f2937"))
+        c.setFont("Helvetica", 9)
+        y -= 24
+        if weekly_pos:
+            for po in weekly_pos[:12]:
+                line = (
+                    f"- {po.get('po_number', 'PO')} | {po.get('company_name', 'Unknown')} | "
+                    f"AED {float(po.get('po_value', 0) or 0):,.0f} | {po.get('status', 'Issued')}"
+                )
+                c.drawString(36, y, line[:132])
+                y -= 12
+        else:
+            c.drawString(36, y, "- No purchase orders captured in this week")
+
+        c.setFillColor(colors.HexColor("#64748b"))
+        c.setFont("Helvetica", 8)
+        c.drawString(34, 18, f"Generated on {now_stamp()} | Page 2")
+
+    c.save()
+    return out_path
+
+
+def save_monthly_executive_pdf_to_downloads(data: dict[str, Any], start: date, end: date) -> Path:
+    try:
+        from reportlab.lib import colors
+        from reportlab.lib.pagesizes import A4
+        from reportlab.pdfgen import canvas
+    except Exception as exc:
+        raise RuntimeError("reportlab is required. Install with: pip install reportlab") from exc
+
+    prospects = data.get("prospects", [])
+    quotations = data.get("quotations", [])
+    purchase_orders = data.get("purchase_orders", [])
+    activities = data.get("activity_log", [])
+
+    monthly_new_prospects = [p for p in prospects if date_in_range(p.get("created_at", ""), start, end)]
+    monthly_quotes = [q for q in quotations if date_in_range(q.get("created_date", ""), start, end)]
+    monthly_pos = [po for po in purchase_orders if date_in_range(po.get("po_date", ""), start, end)]
+    monthly_activities = [a for a in activities if date_in_range(a.get("activity_date", ""), start, end)]
+    monthly_won = [p for p in prospects if p.get("status") == "Won" and date_in_range(p.get("updated_at", ""), start, end)]
+
+    quote_total = sum(float(q.get("quote_value", 0) or 0) for q in monthly_quotes)
+    po_total = sum(float(po.get("po_value", 0) or 0) for po in monthly_pos)
+    pipeline_added = sum(float(p.get("estimated_value", 0) or 0) for p in monthly_new_prospects)
+    won_total = sum(float(p.get("estimated_value", 0) or 0) for p in monthly_won)
+
+    quote_status_counts: dict[str, int] = {}
+    for q in monthly_quotes:
+        status = q.get("status", "Draft")
+        quote_status_counts[status] = quote_status_counts.get(status, 0) + 1
+    top_quote_status = sorted(quote_status_counts.items(), key=lambda x: x[1], reverse=True)
+
+    # Aggregate monthly trend by week bucket (Mon-Sun bucket labels).
+    quote_week_totals: dict[date, float] = {}
+    lead_week_counts: dict[date, float] = {}
+    scan_day = start
+    while scan_day <= end:
+        week_start = scan_day - timedelta(days=scan_day.weekday())
+        quote_week_totals.setdefault(week_start, 0.0)
+        lead_week_counts.setdefault(week_start, 0.0)
+        scan_day += timedelta(days=1)
+
+    for q in monthly_quotes:
+        qd = safe_parse_date(q.get("created_date", ""))
+        if qd and start <= qd <= end:
+            bucket = qd - timedelta(days=qd.weekday())
+            quote_week_totals[bucket] = quote_week_totals.get(bucket, 0.0) + float(q.get("quote_value", 0) or 0)
+
+    for p in monthly_new_prospects:
+        pd_ = safe_parse_date(p.get("created_at", ""))
+        if pd_ and start <= pd_ <= end:
+            bucket = pd_ - timedelta(days=pd_.weekday())
+            lead_week_counts[bucket] = lead_week_counts.get(bucket, 0.0) + 1.0
+
+    ordered_buckets = sorted(quote_week_totals.keys())
+    week_labels = [f"W{i+1}" for i in range(len(ordered_buckets))]
+    quote_values = [quote_week_totals.get(k, 0.0) for k in ordered_buckets]
+    lead_values = [lead_week_counts.get(k, 0.0) for k in ordered_buckets]
+
+    report_dir = DOWNLOADS_DIR / "crm_reports"
+    report_dir.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    period_label = f"{start.isoformat()}_to_{end.isoformat()}"
+    out_path = report_dir / f"monthly_executive_report_{period_label}_{stamp}.pdf"
+
+    c = canvas.Canvas(str(out_path), pagesize=A4)
+    page_w, page_h = A4
+
+    # Header aligned with weekly report visual language.
+    c.setFillColor(colors.HexColor("#edf7fb"))
+    c.rect(0, page_h - 136, page_w, 136, fill=1, stroke=0)
+    c.setFillColor(colors.HexColor("#9bdaf0"))
+    c.rect(0, page_h - 144, page_w, 8, fill=1, stroke=0)
+    c.setFillColor(colors.HexColor("#fbbf24"))
+    c.rect(0, page_h - 150, page_w, 6, fill=1, stroke=0)
+    c.setStrokeColor(colors.HexColor("#c7e6f2"))
+    c.line(0, page_h - 136, page_w, page_h - 136)
+
+    c.setFillColor(colors.HexColor("#0f2940"))
+    c.setFont("Helvetica-Bold", 22)
+    c.drawString(34, page_h - 56, "Metalys Enclosures Manufacturing")
+    c.setFont("Helvetica-Bold", 12)
+    c.drawString(34, page_h - 78, "Monthly Executive CRM Intelligence Report")
+    c.setFont("Helvetica", 11)
+    c.drawString(34, page_h - 96, f"Date Frame: {start} to {end}")
+    c.setFillColor(colors.HexColor("#1d4f68"))
+    c.setFont("Helvetica-Bold", 9)
+    c.drawString(34, page_h - 114, "PREMIUM MONTHLY ANALYTICS VIEW")
+
+    logo_path = _resolve_logo_path()
+    if logo_path:
+        try:
+            c.drawImage(
+                str(logo_path),
+                page_w - 170,
+                page_h - 118,
+                width=130,
+                height=84,
+                mask="auto",
+                preserveAspectRatio=True,
+            )
+        except Exception:
+            pass
+
+    card_y = page_h - 244
+    card_w = (page_w - 34 * 2 - 24) / 4
+    card_h = 76
+    cards = [
+        ("New Prospects", str(len(monthly_new_prospects)), "Monthly lead creation", "#dbeafe"),
+        ("Quote Value", f"AED {quote_total:,.0f}", f"{len(monthly_quotes)} quotations", "#cffafe"),
+        ("PO Value", f"AED {po_total:,.0f}", f"{len(monthly_pos)} purchase orders", "#dcfce7"),
+        ("Won Value", f"AED {won_total:,.0f}", f"{len(monthly_won)} won projects", "#ffedd5"),
+    ]
+    for i, (title, value, note, shade) in enumerate(cards):
+        x = 34 + i * (card_w + 8)
+        c.setFillColor(colors.HexColor(shade))
+        c.roundRect(x, card_y, card_w, card_h, 10, fill=1, stroke=0)
+        c.setStrokeColor(colors.HexColor("#d3e4f3"))
+        c.roundRect(x, card_y, card_w, card_h, 10, fill=0, stroke=1)
+        c.setFillColor(colors.HexColor("#334155"))
+        c.setFont("Helvetica", 8)
+        c.drawCentredString(x + card_w / 2, card_y + 58, title.upper())
+        c.setFillColor(colors.HexColor("#0b2235"))
+        c.setFont("Helvetica-Bold", 13)
+        c.drawCentredString(x + card_w / 2, card_y + 38, value)
+        c.setFillColor(colors.HexColor("#475569"))
+        c.setFont("Helvetica", 8)
+        c.drawCentredString(x + card_w / 2, card_y + 18, note)
+
+    insight_box_y = card_y - 66
+    c.setFillColor(colors.HexColor("#f8fafc"))
+    c.roundRect(34, insight_box_y, page_w - 68, 56, 10, fill=1, stroke=0)
+    c.setStrokeColor(colors.HexColor("#dbe7f2"))
+    c.roundRect(34, insight_box_y, page_w - 68, 56, 10, fill=0, stroke=1)
+    c.setFillColor(colors.HexColor("#0f2940"))
+    c.setFont("Helvetica-Bold", 10)
+    c.drawString(44, insight_box_y + 42, "Monthly Narrative")
+    c.setFillColor(colors.HexColor("#334155"))
+    c.setFont("Helvetica", 9)
+    top_quote_text = ", ".join(f"{k}: {v}" for k, v in top_quote_status[:4]) if top_quote_status else "No quote status changes"
+    insight = (
+        f"Monthly summary: {len(monthly_new_prospects)} new prospects, AED {quote_total:,.0f} quotation value, "
+        f"AED {po_total:,.0f} purchase orders, and AED {pipeline_added:,.0f} pipeline added. "
+        f"Quote status mix: {top_quote_text}."
+    )
+    _pdf_text_block(c, insight, 44, insight_box_y + 26, page_w - 88, leading=11)
+
+    chart_y = insight_box_y - 190
+    chart_w = (page_w - 80) / 2
+    _draw_pdf_bar_chart(
+        c,
+        title="Weekly Quotation Value Trend",
+        labels=week_labels,
+        values=quote_values,
+        x=34,
+        y=chart_y,
+        width=chart_w,
+        height=176,
+        bar_color="#0ea5a4",
+        value_prefix="",
+    )
+    _draw_pdf_bar_chart(
+        c,
+        title="Weekly New Companies Added",
+        labels=week_labels,
+        values=lead_values,
+        x=44 + chart_w,
+        y=chart_y,
+        width=chart_w,
+        height=176,
+        bar_color="#f97316",
+        value_prefix="",
+    )
+
+    c.setFillColor(colors.HexColor("#0f2940"))
+    c.setFont("Helvetica-Bold", 10)
+    c.drawString(34, chart_y - 12, "Strategic Highlights")
+    c.setFillColor(colors.HexColor("#334155"))
+    c.setFont("Helvetica", 9)
+    highlights = [
+        f"Monthly quotation to PO ratio: {((po_total / quote_total) * 100):.1f}%" if quote_total > 0 else "Monthly quotation to PO ratio: not enough quote value data",
+        f"Total activities completed: {len(monthly_activities)}",
+        f"Average quotation value: AED {(quote_total / len(monthly_quotes)):,.0f}" if monthly_quotes else "Average quotation value: no monthly quotations",
+    ]
+    hy = chart_y - 24
+    for item in highlights:
+        c.drawString(36, hy, f"- {item}"[:132])
+        hy -= 12
+
+    c.setFillColor(colors.HexColor("#64748b"))
+    c.setFont("Helvetica", 8)
+    c.drawString(34, 18, f"Generated on {now_stamp()} | Source: Sales CRM Dashboard")
+
+    # Detail appendix page with richer monthly company and quotation detail.
+    c.showPage()
+    c.setFillColor(colors.HexColor("#082f49"))
+    c.rect(0, page_h - 58, page_w, 58, fill=1, stroke=0)
+    c.setFillColor(colors.white)
+    c.setFont("Helvetica-Bold", 14)
+    c.drawString(34, page_h - 36, "Monthly Detail Appendix")
+
+    c.setFillColor(colors.HexColor("#0f2940"))
+    c.setFont("Helvetica-Bold", 11)
+    c.drawString(34, page_h - 82, "New Companies Added")
+    c.setFillColor(colors.HexColor("#1f2937"))
+    c.setFont("Helvetica", 9)
+    y = page_h - 98
+    if monthly_new_prospects:
+        for p in monthly_new_prospects[:20]:
+            line = (
+                f"- {p.get('company_name', 'Unknown')} | {p.get('status', 'New Lead')} | "
+                f"Potential AED {float(p.get('estimated_value', 0) or 0):,.0f}"
+            )
+            c.drawString(36, y, line[:132])
+            y -= 12
+    else:
+        c.drawString(36, y, "- No new companies added in this month")
+        y -= 12
+
+    c.setFillColor(colors.HexColor("#0f2940"))
+    c.setFont("Helvetica-Bold", 11)
+    c.drawString(34, y - 8, "Quotation Details (Company | Product | Value | Status)")
+    c.setFillColor(colors.HexColor("#1f2937"))
+    c.setFont("Helvetica", 9)
+    y -= 24
+    if monthly_quotes:
+        for q in monthly_quotes[:24]:
+            line = (
+                f"- {q.get('customer_name', 'Unknown')} | {q.get('product_name', '')} | "
+                f"{q.get('currency', 'AED')} {float(q.get('quote_value', 0) or 0):,.0f} | {q.get('status', 'Draft')}"
+            )
+            c.drawString(36, y, line[:132])
+            y -= 12
+            if y < 40:
+                break
+    else:
+        c.drawString(36, y, "- No quotation details in this month")
+
+    c.setFillColor(colors.HexColor("#64748b"))
+    c.setFont("Helvetica", 8)
+    c.drawString(34, 18, f"Generated on {now_stamp()} | Page 2")
+
+    c.save()
+    return out_path
 def period_frames(data: dict[str, Any], start: date, end: date) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     prospects = data["prospects"]
     quotations = data["quotations"]
@@ -1882,12 +3732,13 @@ def period_frames(data: dict[str, Any], start: date, end: date) -> tuple[pd.Data
 
 
 def reports_view(data: dict[str, Any]) -> None:
-    st.subheader("Weekly and Monthly Reports")
-    st.caption("Dynamic reports for connected leads, proposals shared, and next actions.")
+    render_workspace_hero(
+        "Workspace",
+        "Weekly and Monthly Reports",
+        "Generate executive-grade reporting packs for pipeline movement, proposal activity, and tactical follow-up.",
+    )
 
     current_day = date.today()
-    week_start = current_day - timedelta(days=current_day.weekday())
-    week_end = week_start + timedelta(days=6)
 
     r1, r2 = st.columns(2)
     with r1:
@@ -1901,39 +3752,54 @@ def reports_view(data: dict[str, Any]) -> None:
         )
 
     active_week_start = selected_week - timedelta(days=selected_week.weekday())
-    active_week_end = active_week_start + timedelta(days=6)
+    active_week_end = min(selected_week, active_week_start + timedelta(days=4))
     month_start = date(current_day.year, selected_month, 1)
     month_end = date(current_day.year, selected_month, calendar.monthrange(current_day.year, selected_month)[1])
 
     wtab, mtab = st.tabs(["Weekly", "Monthly"])
 
     with wtab:
+        st.caption("Weekly reports use business week range: Monday to Friday.")
         st.write(f"Period: {active_week_start} to {active_week_end}")
         render_period_report(data, active_week_start, active_week_end, "weekly")
-        weekly_connected, weekly_proposals, weekly_next_steps, weekly_activities, weekly_won = period_frames(data, active_week_start, active_week_end)
-        st.caption("Click to save weekly report files directly to your local Downloads/crm_reports folder (local run only).")
-        if st.button("Save Weekly Report Files to Downloads", width="stretch"):
+        st.caption("Generate a single premium weekly executive PDF in your local Downloads/crm_reports folder.")
+        if st.button("Generate Weekly Executive PDF", width="stretch"):
             try:
-                files = save_report_bundle_and_refresh("weekly", weekly_connected, weekly_proposals, weekly_next_steps, weekly_activities, weekly_won)
-                st.success("Saved weekly report files:")
-                for path in files:
-                    st.write(str(path))
+                run_key = f"{active_week_start}_{active_week_end}"
+                last_key = st.session_state.get("last_weekly_pdf_key", "")
+                last_at = st.session_state.get("last_weekly_pdf_at")
+                now_time = datetime.now()
+
+                if last_key == run_key and isinstance(last_at, datetime) and (now_time - last_at).total_seconds() < 4:
+                    st.warning("Weekly report already generated just now. Skipping duplicate run.")
+                else:
+                    out_path = save_weekly_executive_pdf_to_downloads(data, active_week_start, active_week_end)
+                    st.session_state["last_weekly_pdf_key"] = run_key
+                    st.session_state["last_weekly_pdf_at"] = now_time
+                    st.success(f"Weekly executive PDF generated: {out_path}")
             except Exception as exc:
-                st.error(f"Could not save report files: {exc}")
+                st.error(f"Could not generate weekly executive PDF: {exc}")
 
     with mtab:
         st.write(f"Period: {month_start} to {month_end}")
         render_period_report(data, month_start, month_end, "monthly", combined_view=True)
-        monthly_connected, monthly_proposals, monthly_next_steps, monthly_activities, monthly_won = period_frames(data, month_start, month_end)
-        st.caption("Click to save monthly report files directly to your local Downloads/crm_reports folder (local run only).")
-        if st.button("Save Monthly Report Files to Downloads", width="stretch"):
+        st.caption("Generate a single premium monthly executive PDF in your local Downloads/crm_reports folder.")
+        if st.button("Generate Monthly Executive PDF", width="stretch"):
             try:
-                files = save_report_bundle_and_refresh("monthly", monthly_connected, monthly_proposals, monthly_next_steps, monthly_activities, monthly_won)
-                st.success("Saved monthly report files:")
-                for path in files:
-                    st.write(str(path))
+                run_key = f"{month_start}_{month_end}"
+                last_key = st.session_state.get("last_monthly_pdf_key", "")
+                last_at = st.session_state.get("last_monthly_pdf_at")
+                now_time = datetime.now()
+
+                if last_key == run_key and isinstance(last_at, datetime) and (now_time - last_at).total_seconds() < 4:
+                    st.warning("Monthly report already generated just now. Skipping duplicate run.")
+                else:
+                    out_path = save_monthly_executive_pdf_to_downloads(data, month_start, month_end)
+                    st.session_state["last_monthly_pdf_key"] = run_key
+                    st.session_state["last_monthly_pdf_at"] = now_time
+                    st.success(f"Monthly executive PDF generated: {out_path}")
             except Exception as exc:
-                st.error(f"Could not save report files: {exc}")
+                st.error(f"Could not generate monthly executive PDF: {exc}")
 
 
 def main() -> None:
