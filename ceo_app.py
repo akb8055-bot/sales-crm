@@ -147,13 +147,12 @@ def _is_ceo_level_activity(activity: dict) -> bool:
     activity_type = str(activity.get("activity_type", "")).strip().lower()
     details = str(activity.get("details", "")).strip().lower()
 
-    if activity_type == "stage updated":
+    if activity_type == "proposal shared":
         return True
-    if activity_type in {"proposal shared", "quotation created", "quotation approved"}:
-        return True
-    if activity_type == "purchase order received":
-        return True
-    if activity_type == "prospect updated" and "stage updated" in details:
+    if activity_type == "prospect updated" and any(
+        keyword in details
+        for keyword in ["discussion", "discuss", "meeting", "call", "follow-up", "follow up", "next action"]
+    ):
         return True
     return False
 
@@ -284,6 +283,7 @@ def main() -> None:
     if not stage_age_df.empty:
         st.markdown("### Stage Aging Watchlist")
         watchlist = stage_age_df.sort_values("age_days", ascending=False).head(12)
+        watchlist = watchlist.drop(columns=["age_days"], errors="ignore")
         render_dynamic_table(
             watchlist,
             "Longest Open Opportunities",
@@ -296,7 +296,7 @@ def main() -> None:
 
     st.markdown("### CEO Updates (Business-Critical Only)")
     st.markdown(
-        "<div class='ceo-note'>Includes only stage movement, quotation milestones, and purchase order receipts. Routine low-level edits are intentionally excluded.</div>",
+        "<div class='ceo-note'>Includes only proposal shared events and recent discussion-level updates with companies. Routine uploads and low-level edits are excluded.</div>",
         unsafe_allow_html=True,
     )
     updates_df = _ceo_updates_df(activities)
@@ -315,7 +315,7 @@ def main() -> None:
     else:
         company_cols = [
             c
-            for c in ["id", "company_name", "contact_name", "status", "estimated_value", "next_action", "updated_at"]
+            for c in ["id", "company_name", "contact_name", "status", "estimated_value", "next_action"]
             if c in prospects_df.columns
         ]
         render_dynamic_table(
