@@ -3598,19 +3598,19 @@ def _draw_pdf_bar_chart(
     c.roundRect(x, y, width, height, 10, fill=0, stroke=1)
 
     c.setFillColor(colors.HexColor("#0f2940"))
-    c.setFont("Helvetica-Bold", 10)
-    c.drawString(x + 10, y + height - 16, title)
+    c.setFont("Helvetica-Bold", 12)
+    c.drawString(x + 10, y + height - 18, title)
 
     if not labels or not values:
         c.setFillColor(colors.HexColor("#64748b"))
-        c.setFont("Helvetica", 9)
+        c.setFont("Helvetica", 10)
         c.drawString(x + 10, y + height / 2, "No data for selected period")
         return
 
     chart_x = x + 10
-    chart_y = y + 22
+    chart_y = y + 26
     chart_w = width - 20
-    chart_h = height - 44
+    chart_h = height - 52
 
     c.setStrokeColor(colors.HexColor("#b9d7ea"))
     c.line(chart_x, chart_y, chart_x, chart_y + chart_h)
@@ -3633,13 +3633,13 @@ def _draw_pdf_bar_chart(
         c.roundRect(bx, by, bar_w, bh, 3, fill=1, stroke=0)
 
         c.setFillColor(colors.HexColor("#0b2235"))
-        c.setFont("Helvetica", 7)
+        c.setFont("Helvetica", 9)
         c.drawCentredString(bx + bar_w / 2, chart_y - 10, labels[i][:6])
 
         c.setFillColor(colors.HexColor("#334155"))
-        c.setFont("Helvetica", 7)
+        c.setFont("Helvetica", 9)
         value_text = f"{value_prefix}{value:,.0f}" if value >= 100 else f"{value_prefix}{value:.0f}"
-        c.drawCentredString(bx + bar_w / 2, by + bh + 3, value_text)
+        c.drawCentredString(bx + bar_w / 2, by + bh + 5, value_text)
 
 
 def save_weekly_executive_pdf_to_downloads(data: dict[str, Any], start: date, end: date) -> Path:
@@ -3709,14 +3709,14 @@ def save_weekly_executive_pdf_to_downloads(data: dict[str, Any], start: date, en
     c.line(0, page_h - 136, page_w, page_h - 136)
 
     c.setFillColor(colors.HexColor("#0f2940"))
-    c.setFont("Helvetica-Bold", 22)
+    c.setFont("Helvetica-Bold", 24)
     c.drawString(34, page_h - 56, "Metalys Enclosures Manufacturing")
-    c.setFont("Helvetica-Bold", 12)
+    c.setFont("Helvetica-Bold", 14)
     c.drawString(34, page_h - 78, "Weekly Executive CRM Intelligence Report")
-    c.setFont("Helvetica", 11)
+    c.setFont("Helvetica", 12)
     c.drawString(34, page_h - 96, f"Date Frame: {start} to {end}")
     c.setFillColor(colors.HexColor("#1d4f68"))
-    c.setFont("Helvetica-Bold", 9)
+    c.setFont("Helvetica-Bold", 10)
     c.drawString(34, page_h - 114, "PREMIUM ANALYTICS VIEW")
 
     logo_path = _resolve_logo_path()
@@ -3736,7 +3736,7 @@ def save_weekly_executive_pdf_to_downloads(data: dict[str, Any], start: date, en
 
     card_y = page_h - 244
     card_w = (page_w - 34 * 2 - 24) / 4
-    card_h = 76
+    card_h = 84
     cards = [
         ("New Prospects", str(len(weekly_new_prospects)), "Weekly lead creation", "#dbeafe"),
         ("Quote Value", f"AED {quote_total:,.0f}", f"{len(weekly_quotes)} quotations", "#cffafe"),
@@ -3750,32 +3750,32 @@ def save_weekly_executive_pdf_to_downloads(data: dict[str, Any], start: date, en
         c.setStrokeColor(colors.HexColor("#d3e4f3"))
         c.roundRect(x, card_y, card_w, card_h, 10, fill=0, stroke=1)
         c.setFillColor(colors.HexColor("#334155"))
-        c.setFont("Helvetica", 8)
-        c.drawCentredString(x + card_w / 2, card_y + 58, title.upper())
+        c.setFont("Helvetica", 9)
+        c.drawCentredString(x + card_w / 2, card_y + 66, title.upper())
         c.setFillColor(colors.HexColor("#0b2235"))
-        c.setFont("Helvetica-Bold", 13)
-        c.drawCentredString(x + card_w / 2, card_y + 38, value)
+        c.setFont("Helvetica-Bold", 15)
+        c.drawCentredString(x + card_w / 2, card_y + 44, value)
         c.setFillColor(colors.HexColor("#475569"))
-        c.setFont("Helvetica", 8)
-        c.drawCentredString(x + card_w / 2, card_y + 18, note)
+        c.setFont("Helvetica", 9)
+        c.drawCentredString(x + card_w / 2, card_y + 22, note)
 
-    insight_box_y = card_y - 66
+    insight_box_y = card_y - 78
     c.setFillColor(colors.HexColor("#f8fafc"))
-    c.roundRect(34, insight_box_y, page_w - 68, 56, 10, fill=1, stroke=0)
+    c.roundRect(34, insight_box_y, page_w - 68, 72, 10, fill=1, stroke=0)
     c.setStrokeColor(colors.HexColor("#dbe7f2"))
-    c.roundRect(34, insight_box_y, page_w - 68, 56, 10, fill=0, stroke=1)
+    c.roundRect(34, insight_box_y, page_w - 68, 72, 10, fill=0, stroke=1)
     c.setFillColor(colors.HexColor("#0f2940"))
-    c.setFont("Helvetica-Bold", 10)
-    c.drawString(44, insight_box_y + 42, "Executive Narrative")
+    c.setFont("Helvetica-Bold", 12)
+    c.drawString(44, insight_box_y + 54, "Executive Narrative")
     c.setFillColor(colors.HexColor("#334155"))
-    c.setFont("Helvetica", 9)
+    c.setFont("Helvetica", 10)
     insight = (
         f"Pipeline acceleration this week: {len(weekly_new_prospects)} new prospects and AED {quote_total:,.0f} in quotations. "
         f"Sales stage trend: {top_status_text}. Quotation trend: {top_quote_text}."
     )
-    _pdf_text_block(c, insight, 44, insight_box_y + 26, page_w - 88, leading=11)
+    _pdf_text_block(c, insight, 44, insight_box_y + 38, page_w - 88, leading=13)
 
-    chart_y = insight_box_y - 190
+    chart_y = insight_box_y - 220
     chart_w = (page_w - 80) / 2
     _draw_pdf_bar_chart(
         c,
@@ -3785,7 +3785,7 @@ def save_weekly_executive_pdf_to_downloads(data: dict[str, Any], start: date, en
         x=34,
         y=chart_y,
         width=chart_w,
-        height=176,
+        height=208,
         bar_color="#0ea5a4",
         value_prefix="",
     )
@@ -3797,29 +3797,29 @@ def save_weekly_executive_pdf_to_downloads(data: dict[str, Any], start: date, en
         x=44 + chart_w,
         y=chart_y,
         width=chart_w,
-        height=176,
+        height=208,
         bar_color="#f97316",
         value_prefix="",
     )
 
     c.setFillColor(colors.HexColor("#0f2940"))
-    c.setFont("Helvetica-Bold", 10)
+    c.setFont("Helvetica-Bold", 12)
     c.drawString(34, chart_y - 12, "Strategic Highlights")
     c.setFillColor(colors.HexColor("#334155"))
-    c.setFont("Helvetica", 9)
+    c.setFont("Helvetica", 10)
     highlights = [
         f"Quotation to PO ratio (value): {((po_total / quote_total) * 100):.1f}%" if quote_total > 0 else "Quotation to PO ratio: not enough quote value data",
         f"Most active prospect stage this week: {top_status[0][0]} ({top_status[0][1]})" if top_status else "No stage transitions captured this week",
         f"Most common quotation status: {top_quote_status[0][0]} ({top_quote_status[0][1]})" if top_quote_status else "No quotations created this week",
     ]
-    hy = chart_y - 24
+    hy = chart_y - 28
     for item in highlights:
         c.drawString(36, hy, f"- {item}"[:132])
-        hy -= 12
+        hy -= 14
 
     # Always show weekly company and quotation detail snapshots on the main page.
-    detail_box_y = 108
-    detail_box_h = 152
+    detail_box_y = 84
+    detail_box_h = 170
     detail_box_w = (page_w - 80) / 2
 
     left_box_x = 34
@@ -3833,12 +3833,12 @@ def save_weekly_executive_pdf_to_downloads(data: dict[str, Any], start: date, en
     c.roundRect(right_box_x, detail_box_y, detail_box_w, detail_box_h, 10, fill=0, stroke=1)
 
     c.setFillColor(colors.HexColor("#0f2940"))
-    c.setFont("Helvetica-Bold", 10)
+    c.setFont("Helvetica-Bold", 11)
     c.drawString(left_box_x + 10, detail_box_y + detail_box_h - 16, "New Companies Added This Week")
     c.drawString(right_box_x + 10, detail_box_y + detail_box_h - 16, "Quotation Details by Company")
 
     c.setFillColor(colors.HexColor("#334155"))
-    c.setFont("Helvetica", 8)
+    c.setFont("Helvetica", 9)
     left_y = detail_box_y + detail_box_h - 32
     if weekly_new_prospects:
         for prospect in weekly_new_prospects[:8]:
@@ -3847,7 +3847,7 @@ def save_weekly_executive_pdf_to_downloads(data: dict[str, Any], start: date, en
                 f"{prospect.get('status', 'New Lead')} | AED {float(prospect.get('estimated_value', 0) or 0):,.0f}"
             )
             c.drawString(left_box_x + 10, left_y, line[:62])
-            left_y -= 12
+            left_y -= 14
     else:
         c.drawString(left_box_x + 10, left_y, "- No new companies added in this week")
 
@@ -3859,80 +3859,13 @@ def save_weekly_executive_pdf_to_downloads(data: dict[str, Any], start: date, en
                 f"{quote.get('currency', 'AED')} {float(quote.get('quote_value', 0) or 0):,.0f}"
             )
             c.drawString(right_box_x + 10, right_y, line[:62])
-            right_y -= 12
+            right_y -= 14
     else:
         c.drawString(right_box_x + 10, right_y, "- No quotation details in this week")
 
     c.setFillColor(colors.HexColor("#64748b"))
     c.setFont("Helvetica", 8)
     c.drawString(34, 18, f"Generated on {now_stamp()} | Source: Sales CRM Dashboard")
-
-    detail_rows = min(len(weekly_new_prospects), 14) + min(len(weekly_quotes), 14) + min(len(weekly_pos), 12)
-    if detail_rows > 16:
-        c.showPage()
-
-        c.setFillColor(colors.HexColor("#082f49"))
-        c.rect(0, page_h - 58, page_w, 58, fill=1, stroke=0)
-        c.setFillColor(colors.white)
-        c.setFont("Helvetica-Bold", 14)
-        c.drawString(34, page_h - 36, "Pipeline Detail Appendix")
-
-        c.setFillColor(colors.HexColor("#0f2940"))
-        c.setFont("Helvetica-Bold", 11)
-        c.drawString(34, page_h - 82, "Top New Prospects")
-        c.setFillColor(colors.HexColor("#1f2937"))
-        c.setFont("Helvetica", 9)
-        y = page_h - 98
-        if weekly_new_prospects:
-            for p in weekly_new_prospects[:14]:
-                line = (
-                    f"- {p.get('company_name', 'Unknown')} | {p.get('status', 'New Lead')} | "
-                    f"Potential AED {float(p.get('estimated_value', 0) or 0):,.0f}"
-                )
-                c.drawString(36, y, line[:132])
-                y -= 12
-        else:
-            c.drawString(36, y, "- No new prospects added in this week")
-            y -= 12
-
-        c.setFillColor(colors.HexColor("#0f2940"))
-        c.setFont("Helvetica-Bold", 11)
-        c.drawString(34, y - 8, "Latest Quotations")
-        c.setFillColor(colors.HexColor("#1f2937"))
-        c.setFont("Helvetica", 9)
-        y -= 24
-        if weekly_quotes:
-            for q in weekly_quotes[:14]:
-                line = (
-                    f"- {q.get('customer_name', 'Unknown')} | {q.get('product_name', '')} | "
-                    f"{q.get('currency', 'AED')} {float(q.get('quote_value', 0) or 0):,.0f} | {q.get('status', 'Draft')}"
-                )
-                c.drawString(36, y, line[:132])
-                y -= 12
-        else:
-            c.drawString(36, y, "- No quotations issued in this week")
-            y -= 12
-
-        c.setFillColor(colors.HexColor("#0f2940"))
-        c.setFont("Helvetica-Bold", 11)
-        c.drawString(34, y - 8, "Latest Purchase Orders")
-        c.setFillColor(colors.HexColor("#1f2937"))
-        c.setFont("Helvetica", 9)
-        y -= 24
-        if weekly_pos:
-            for po in weekly_pos[:12]:
-                line = (
-                    f"- {po.get('po_number', 'PO')} | {po.get('company_name', 'Unknown')} | "
-                    f"AED {float(po.get('po_value', 0) or 0):,.0f} | {po.get('status', 'Issued')}"
-                )
-                c.drawString(36, y, line[:132])
-                y -= 12
-        else:
-            c.drawString(36, y, "- No purchase orders captured in this week")
-
-        c.setFillColor(colors.HexColor("#64748b"))
-        c.setFont("Helvetica", 8)
-        c.drawString(34, 18, f"Generated on {now_stamp()} | Page 2")
 
     c.save()
     return out_path
@@ -4015,14 +3948,14 @@ def save_monthly_executive_pdf_to_downloads(data: dict[str, Any], start: date, e
     c.line(0, page_h - 136, page_w, page_h - 136)
 
     c.setFillColor(colors.HexColor("#0f2940"))
-    c.setFont("Helvetica-Bold", 22)
+    c.setFont("Helvetica-Bold", 24)
     c.drawString(34, page_h - 56, "Metalys Enclosures Manufacturing")
-    c.setFont("Helvetica-Bold", 12)
+    c.setFont("Helvetica-Bold", 14)
     c.drawString(34, page_h - 78, "Monthly Executive CRM Intelligence Report")
-    c.setFont("Helvetica", 11)
+    c.setFont("Helvetica", 12)
     c.drawString(34, page_h - 96, f"Date Frame: {start} to {end}")
     c.setFillColor(colors.HexColor("#1d4f68"))
-    c.setFont("Helvetica-Bold", 9)
+    c.setFont("Helvetica-Bold", 10)
     c.drawString(34, page_h - 114, "PREMIUM MONTHLY ANALYTICS VIEW")
 
     logo_path = _resolve_logo_path()
@@ -4042,7 +3975,7 @@ def save_monthly_executive_pdf_to_downloads(data: dict[str, Any], start: date, e
 
     card_y = page_h - 244
     card_w = (page_w - 34 * 2 - 24) / 4
-    card_h = 76
+    card_h = 84
     cards = [
         ("New Prospects", str(len(monthly_new_prospects)), "Monthly lead creation", "#dbeafe"),
         ("Quote Value", f"AED {quote_total:,.0f}", f"{len(monthly_quotes)} quotations", "#cffafe"),
@@ -4056,34 +3989,34 @@ def save_monthly_executive_pdf_to_downloads(data: dict[str, Any], start: date, e
         c.setStrokeColor(colors.HexColor("#d3e4f3"))
         c.roundRect(x, card_y, card_w, card_h, 10, fill=0, stroke=1)
         c.setFillColor(colors.HexColor("#334155"))
-        c.setFont("Helvetica", 8)
-        c.drawCentredString(x + card_w / 2, card_y + 58, title.upper())
+        c.setFont("Helvetica", 9)
+        c.drawCentredString(x + card_w / 2, card_y + 66, title.upper())
         c.setFillColor(colors.HexColor("#0b2235"))
-        c.setFont("Helvetica-Bold", 13)
-        c.drawCentredString(x + card_w / 2, card_y + 38, value)
+        c.setFont("Helvetica-Bold", 15)
+        c.drawCentredString(x + card_w / 2, card_y + 44, value)
         c.setFillColor(colors.HexColor("#475569"))
-        c.setFont("Helvetica", 8)
-        c.drawCentredString(x + card_w / 2, card_y + 18, note)
+        c.setFont("Helvetica", 9)
+        c.drawCentredString(x + card_w / 2, card_y + 22, note)
 
-    insight_box_y = card_y - 66
+    insight_box_y = card_y - 78
     c.setFillColor(colors.HexColor("#f8fafc"))
-    c.roundRect(34, insight_box_y, page_w - 68, 56, 10, fill=1, stroke=0)
+    c.roundRect(34, insight_box_y, page_w - 68, 72, 10, fill=1, stroke=0)
     c.setStrokeColor(colors.HexColor("#dbe7f2"))
-    c.roundRect(34, insight_box_y, page_w - 68, 56, 10, fill=0, stroke=1)
+    c.roundRect(34, insight_box_y, page_w - 68, 72, 10, fill=0, stroke=1)
     c.setFillColor(colors.HexColor("#0f2940"))
-    c.setFont("Helvetica-Bold", 10)
-    c.drawString(44, insight_box_y + 42, "Monthly Narrative")
+    c.setFont("Helvetica-Bold", 12)
+    c.drawString(44, insight_box_y + 54, "Monthly Narrative")
     c.setFillColor(colors.HexColor("#334155"))
-    c.setFont("Helvetica", 9)
+    c.setFont("Helvetica", 10)
     top_quote_text = ", ".join(f"{k}: {v}" for k, v in top_quote_status[:4]) if top_quote_status else "No quote status changes"
     insight = (
         f"Monthly summary: {len(monthly_new_prospects)} new prospects, AED {quote_total:,.0f} quotation value, "
         f"AED {po_total:,.0f} purchase orders, and AED {pipeline_added:,.0f} pipeline added. "
         f"Quote status mix: {top_quote_text}."
     )
-    _pdf_text_block(c, insight, 44, insight_box_y + 26, page_w - 88, leading=11)
+    _pdf_text_block(c, insight, 44, insight_box_y + 38, page_w - 88, leading=13)
 
-    chart_y = insight_box_y - 190
+    chart_y = insight_box_y - 220
     chart_w = (page_w - 80) / 2
     _draw_pdf_bar_chart(
         c,
@@ -4093,7 +4026,7 @@ def save_monthly_executive_pdf_to_downloads(data: dict[str, Any], start: date, e
         x=34,
         y=chart_y,
         width=chart_w,
-        height=176,
+        height=208,
         bar_color="#0ea5a4",
         value_prefix="",
     )
@@ -4105,78 +4038,73 @@ def save_monthly_executive_pdf_to_downloads(data: dict[str, Any], start: date, e
         x=44 + chart_w,
         y=chart_y,
         width=chart_w,
-        height=176,
+        height=208,
         bar_color="#f97316",
         value_prefix="",
     )
 
     c.setFillColor(colors.HexColor("#0f2940"))
-    c.setFont("Helvetica-Bold", 10)
+    c.setFont("Helvetica-Bold", 12)
     c.drawString(34, chart_y - 12, "Strategic Highlights")
     c.setFillColor(colors.HexColor("#334155"))
-    c.setFont("Helvetica", 9)
+    c.setFont("Helvetica", 10)
     highlights = [
         f"Monthly quotation to PO ratio: {((po_total / quote_total) * 100):.1f}%" if quote_total > 0 else "Monthly quotation to PO ratio: not enough quote value data",
         f"Total activities completed: {len(monthly_activities)}",
         f"Average quotation value: AED {(quote_total / len(monthly_quotes)):,.0f}" if monthly_quotes else "Average quotation value: no monthly quotations",
     ]
-    hy = chart_y - 24
+    hy = chart_y - 28
     for item in highlights:
         c.drawString(36, hy, f"- {item}"[:132])
-        hy -= 12
+        hy -= 14
+
+    detail_box_y = 84
+    detail_box_h = 170
+    detail_box_w = (page_w - 80) / 2
+    left_box_x = 34
+    right_box_x = 44 + detail_box_w
+
+    c.setFillColor(colors.HexColor("#f8fafc"))
+    c.roundRect(left_box_x, detail_box_y, detail_box_w, detail_box_h, 10, fill=1, stroke=0)
+    c.roundRect(right_box_x, detail_box_y, detail_box_w, detail_box_h, 10, fill=1, stroke=0)
+    c.setStrokeColor(colors.HexColor("#dbe7f2"))
+    c.roundRect(left_box_x, detail_box_y, detail_box_w, detail_box_h, 10, fill=0, stroke=1)
+    c.roundRect(right_box_x, detail_box_y, detail_box_w, detail_box_h, 10, fill=0, stroke=1)
+
+    c.setFillColor(colors.HexColor("#0f2940"))
+    c.setFont("Helvetica-Bold", 11)
+    c.drawString(left_box_x + 10, detail_box_y + detail_box_h - 16, "New Companies Added This Month")
+    c.drawString(right_box_x + 10, detail_box_y + detail_box_h - 16, "Quotation Details by Company")
+
+    c.setFillColor(colors.HexColor("#334155"))
+    c.setFont("Helvetica", 9)
+    left_y = detail_box_y + detail_box_h - 32
+    if monthly_new_prospects:
+        for prospect in monthly_new_prospects[:8]:
+            line = (
+                f"- {prospect.get('company_name', 'Unknown')} | "
+                f"{prospect.get('status', 'New Lead')} | AED {float(prospect.get('estimated_value', 0) or 0):,.0f}"
+            )
+            c.drawString(left_box_x + 10, left_y, line[:62])
+            left_y -= 14
+    else:
+        c.drawString(left_box_x + 10, left_y, "- No new companies added in this month")
+
+    right_y = detail_box_y + detail_box_h - 32
+    if monthly_quotes:
+        for quote in monthly_quotes[:8]:
+            line = (
+                f"- {quote.get('customer_name', 'Unknown')} | {quote.get('product_name', '')} | "
+                f"{quote.get('currency', 'AED')} {float(quote.get('quote_value', 0) or 0):,.0f}"
+            )
+            c.drawString(right_box_x + 10, right_y, line[:62])
+            right_y -= 14
+    else:
+        c.drawString(right_box_x + 10, right_y, "- No quotation details in this month")
 
     c.setFillColor(colors.HexColor("#64748b"))
     c.setFont("Helvetica", 8)
     c.drawString(34, 18, f"Generated on {now_stamp()} | Source: Sales CRM Dashboard")
-
-    # Detail appendix page with richer monthly company and quotation detail.
-    c.showPage()
-    c.setFillColor(colors.HexColor("#082f49"))
-    c.rect(0, page_h - 58, page_w, 58, fill=1, stroke=0)
-    c.setFillColor(colors.white)
-    c.setFont("Helvetica-Bold", 14)
-    c.drawString(34, page_h - 36, "Monthly Detail Appendix")
-
-    c.setFillColor(colors.HexColor("#0f2940"))
-    c.setFont("Helvetica-Bold", 11)
-    c.drawString(34, page_h - 82, "New Companies Added")
-    c.setFillColor(colors.HexColor("#1f2937"))
-    c.setFont("Helvetica", 9)
-    y = page_h - 98
-    if monthly_new_prospects:
-        for p in monthly_new_prospects[:20]:
-            line = (
-                f"- {p.get('company_name', 'Unknown')} | {p.get('status', 'New Lead')} | "
-                f"Potential AED {float(p.get('estimated_value', 0) or 0):,.0f}"
-            )
-            c.drawString(36, y, line[:132])
-            y -= 12
-    else:
-        c.drawString(36, y, "- No new companies added in this month")
-        y -= 12
-
-    c.setFillColor(colors.HexColor("#0f2940"))
-    c.setFont("Helvetica-Bold", 11)
-    c.drawString(34, y - 8, "Quotation Details (Company | Product | Value | Status)")
-    c.setFillColor(colors.HexColor("#1f2937"))
-    c.setFont("Helvetica", 9)
-    y -= 24
-    if monthly_quotes:
-        for q in monthly_quotes[:24]:
-            line = (
-                f"- {q.get('customer_name', 'Unknown')} | {q.get('product_name', '')} | "
-                f"{q.get('currency', 'AED')} {float(q.get('quote_value', 0) or 0):,.0f} | {q.get('status', 'Draft')}"
-            )
-            c.drawString(36, y, line[:132])
-            y -= 12
-            if y < 40:
-                break
-    else:
-        c.drawString(36, y, "- No quotation details in this month")
-
-    c.setFillColor(colors.HexColor("#64748b"))
-    c.setFont("Helvetica", 8)
-    c.drawString(34, 18, f"Generated on {now_stamp()} | Page 2")
 
     c.save()
     return out_path
