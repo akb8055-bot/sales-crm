@@ -18,7 +18,7 @@ import streamlit.components.v1 as components
 
 st.set_page_config(page_title="Custom Sales CRM", page_icon="📈", layout="wide")
 
-APP_RELEASE = "2026-07-29-r4"
+APP_RELEASE = "2026-07-31-r5"
 DOWNLOADS_DIR = Path.home() / "Downloads"
 COMPANY_LOGO_SOURCE = DOWNLOADS_DIR / "WhatsApp_Image_2026-07-08_at_15.51.12__1_-removebg-preview.png"
 COMPANY_LOGO_FALLBACK = DOWNLOADS_DIR / "WhatsApp Image 2026-07-08 at 15.51.12.jpeg"
