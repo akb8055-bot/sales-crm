@@ -3458,80 +3458,14 @@ def render_period_report(data: dict[str, Any], start: date, end: date, label: st
     won_projects = [p for p in prospects if p.get("status") == "Won" and date_in_range(p.get("updated_at", ""), start, end)]
 
     connected_df = pd.DataFrame(connected)
-    proposals_df = pd.DataFrame(proposals)
-    updates_df = pd.DataFrame(prospect_updates)
-    activities_df = pd.DataFrame(activities_in_period)
-    won_df = pd.DataFrame(won_projects)
-
-    prospect_map = {p["id"]: p for p in prospects}
-    quote_map = latest_quote_map(quotations)
-    next_steps_rows = []
-    for quote in proposals:
-        linked = prospect_map.get(quote.get("prospect_id", ""), {})
-        next_steps_rows.append(
-            {
-                "prospect_id": quote.get("prospect_id", ""),
-                "company_name": quote.get("customer_name", ""),
-                "product_name": quote.get("product_name", ""),
-                "quote_value": quote.get("quote_value", 0),
-                "quote_status": quote.get("status", ""),
-                "next_step": linked.get("next_action", ""),
-                "current_stage": linked.get("status", ""),
-                "expected_close_date": linked.get("expected_close_date", ""),
-            }
-        )
-    next_steps_df = pd.DataFrame(next_steps_rows)
-
-    won_rows = []
-    for project in won_projects:
-        q = quote_map.get(project["id"], {})
-        won_rows.append(
-            {
-                "prospect_id": project.get("id", ""),
-                "company_name": project.get("company_name", ""),
-                "contact_name": project.get("contact_name", ""),
-                "product_name": q.get("product_name", project.get("product_interest", "")),
-                "quotation_value": float(q.get("quote_value", 0) or 0),
-                "quote_status": q.get("status", ""),
-                "won_date": project.get("updated_at", ""),
-                "next_step": project.get("next_action", ""),
-            }
-        )
-    won_detail_df = pd.DataFrame(won_rows)
-
     proposal_total = sum(float(x.get("quote_value", 0) or 0) for x in proposals)
-    won_total = sum(float(x.get("quotation_value", 0) or 0) for x in won_rows)
-
-    report_trend = pd.DataFrame(
-        [
-            {"label": "Connected", "value": len(connected)},
-            {"label": "Proposals", "value": len(proposals)},
-            {"label": "Activities", "value": len(activities_in_period)},
-            {"label": "Won Projects", "value": len(won_rows)},
-        ]
-    )
-    report_max = max(int(report_trend["value"].max()) if not report_trend.empty else 0, 1)
-    report_trend_chart = (
-        alt.Chart(report_trend)
-        .mark_bar(cornerRadiusTopLeft=10, cornerRadiusTopRight=10, size=42)
-        .encode(
-            x=alt.X("label:N", title=None, axis=alt.Axis(labelAngle=0, labelFontSize=11)),
-            y=alt.Y("value:Q", title=None, scale=alt.Scale(domain=[0, report_max])),
-            color=alt.Color(
-                "label:N",
-                legend=None,
-                scale=alt.Scale(range=["#0ea5a4", "#38bdf8", "#f97316", "#22c55e"]),
-            ),
-            tooltip=[alt.Tooltip("label:N", title="Metric"), alt.Tooltip("value:Q", title="Count")],
-        )
-        .properties(height=180)
-    )
+    won_total = sum(float(x.get("estimated_value", 0) or 0) for x in won_projects)
 
     st.markdown(
         f"""
         <div class='report-hero'>
             <h3>{label.title()} Sales Performance Report</h3>
-            <p>Date frame: {start} to {end}. A concise executive view of connected leads, proposals issued, tracked activity, and won business value.</p>
+            <p>Date frame: {start} to {end}. Clean executive report focused on connected leads and core outcome metrics.</p>
         </div>
         """,
         unsafe_allow_html=True,
@@ -3543,7 +3477,7 @@ def render_period_report(data: dict[str, Any], start: date, end: date, label: st
             <div class='report-card'>
                 <div class='kpi-label'>Leads Connected</div>
                 <div class='kpi-value'>{len(connected)}</div>
-                <div class='kpi-note'>Prospects moved into an active conversation during the period.</div>
+                <div class='kpi-note'>Prospects moved into active conversations during the period.</div>
             </div>
             <div class='report-card'>
                 <div class='kpi-label'>Proposals Shared</div>
@@ -3557,196 +3491,21 @@ def render_period_report(data: dict[str, Any], start: date, end: date, label: st
             </div>
             <div class='report-card'>
                 <div class='kpi-label'>Won Projects</div>
-                <div class='kpi-value'>{len(won_rows)} | AED {won_total:,.0f}</div>
+                <div class='kpi-value'>{len(won_projects)} | AED {won_total:,.0f}</div>
                 <div class='kpi-note'>Commercial wins captured in the selected period.</div>
             </div>
         </div>
         """,
         unsafe_allow_html=True,
     )
-
-    summary_text = (
-        f"In this {label} period, {len(connected)} leads were connected, {len(proposals)} proposals were shared, "
-        f"and total quoted value reached AED {proposal_total:,.0f}. "
-        f"There were {len(prospect_updates)} prospect updates and {len(activities_in_period)} tracked activities. "
-        f"Won project value stands at AED {won_total:,.0f}."
-    )
-
-    st.markdown("<div class='report-section'>", unsafe_allow_html=True)
-    st.markdown("#### Executive Summary")
-    st.markdown(f"<div class='report-note'>{summary_text}</div>", unsafe_allow_html=True)
-    st.altair_chart(report_trend_chart, use_container_width=True)
-
-    if combined_view:
-        left_col, right_col = st.columns(2)
-
-        with left_col:
-            st.markdown("##### Leads Connected")
-            if connected_df.empty:
-                st.info("No connected leads in this period.")
-            else:
-                connected_view = connected_df[
-                    ["id", "company_name", "contact_name", "status", "connected_at", "next_action", "estimated_value"]
-                ]
-                render_dynamic_table(connected_view, "Connected Leads", key=f"{label}_connected_left", max_rows=100)
-                st.download_button(
-                    "Download Connected Leads CSV",
-                    data=csv_bytes(connected_view),
-                    file_name=f"connected_leads_{label.lower()}.csv",
-                    mime="text/csv",
-                )
-
-            st.markdown("##### Next Steps for Proposal Leads")
-            if next_steps_df.empty:
-                st.info("No next-step records available for proposals in this period.")
-            else:
-                render_dynamic_table(next_steps_df, "Proposal Next Steps", key=f"{label}_nextsteps_left", max_rows=100)
-                st.download_button(
-                    "Download Next Steps CSV",
-                    data=csv_bytes(next_steps_df),
-                    file_name=f"proposal_next_steps_{label.lower()}.csv",
-                    mime="text/csv",
-                )
-
-            st.markdown("##### Activities Completed")
-            if activities_df.empty:
-                st.info("No tracked activities in this period.")
-            else:
-                activities_view = activities_df[
-                    ["activity_id", "activity_type", "company_name", "details", "product_name", "amount", "activity_date", "status"]
-                ]
-                render_dynamic_table(activities_view, "Activities Completed", key=f"{label}_activities_left", max_rows=100)
-                st.download_button(
-                    "Download Activities CSV",
-                    data=csv_bytes(activities_view),
-                    file_name=f"activities_{label.lower()}.csv",
-                    mime="text/csv",
-                )
-
-        with right_col:
-            st.markdown("##### Proposals Shared")
-            if proposals_df.empty:
-                st.info("No proposals shared in this period.")
-            else:
-                proposal_view = proposals_df[
-                    ["id", "prospect_id", "customer_name", "product_name", "quote_value", "status", "created_date"]
-                ]
-                render_dynamic_table(proposal_view, "Proposals Shared", key=f"{label}_proposals_right", max_rows=100)
-                st.download_button(
-                    "Download Proposals CSV",
-                    data=csv_bytes(proposal_view),
-                    file_name=f"proposals_{label.lower()}.csv",
-                    mime="text/csv",
-                )
-
-            st.markdown("##### Latest Prospect Updates")
-            if updates_df.empty:
-                st.info("No prospect updates in this period.")
-            else:
-                updates_view = updates_df[["id", "company_name", "status", "updated_at", "next_action", "notes"]]
-                render_dynamic_table(updates_view, "Latest Prospect Updates", key=f"{label}_updates_right", max_rows=100)
-                st.download_button(
-                    "Download Prospect Updates CSV",
-                    data=csv_bytes(updates_view),
-                    file_name=f"prospect_updates_{label.lower()}.csv",
-                    mime="text/csv",
-                )
-
-            st.markdown("##### Won Projects and Commercial Details")
-            if won_detail_df.empty:
-                st.info("No projects marked as Won in this period.")
-            else:
-                render_dynamic_table(won_detail_df, "Won Projects", key=f"{label}_won_right", max_rows=100)
-                st.download_button(
-                    "Download Won Projects CSV",
-                    data=csv_bytes(won_detail_df),
-                    file_name=f"won_projects_{label.lower()}.csv",
-                    mime="text/csv",
-                )
+    st.markdown("##### Leads Connected")
+    if connected_df.empty:
+        st.info("No connected leads in this period.")
     else:
-        st.markdown("##### Leads Connected")
-        if connected_df.empty:
-            st.info("No connected leads in this period.")
-        else:
-            connected_view = connected_df[
-                ["id", "company_name", "contact_name", "status", "connected_at", "next_action", "estimated_value"]
-            ]
-            render_dynamic_table(connected_view, "Connected Leads", key=f"{label}_connected", max_rows=120)
-            st.download_button(
-                "Download Connected Leads CSV",
-                data=csv_bytes(connected_view),
-                file_name=f"connected_leads_{label.lower()}.csv",
-                mime="text/csv",
-            )
-
-        st.markdown("##### Proposals Shared")
-        if proposals_df.empty:
-            st.info("No proposals shared in this period.")
-        else:
-            proposal_view = proposals_df[
-                ["id", "prospect_id", "customer_name", "product_name", "quote_value", "status", "created_date"]
-            ]
-            render_dynamic_table(proposal_view, "Proposals Shared", key=f"{label}_proposals", max_rows=120)
-            st.download_button(
-                "Download Proposals CSV",
-                data=csv_bytes(proposal_view),
-                file_name=f"proposals_{label.lower()}.csv",
-                mime="text/csv",
-            )
-
-        st.markdown("##### Next Steps for Proposal Leads")
-        if next_steps_df.empty:
-            st.info("No next-step records available for proposals in this period.")
-        else:
-            render_dynamic_table(next_steps_df, "Proposal Next Steps", key=f"{label}_nextsteps", max_rows=120)
-            st.download_button(
-                "Download Next Steps CSV",
-                data=csv_bytes(next_steps_df),
-                file_name=f"proposal_next_steps_{label.lower()}.csv",
-                mime="text/csv",
-            )
-
-        st.markdown("##### Latest Prospect Updates")
-        if updates_df.empty:
-            st.info("No prospect updates in this period.")
-        else:
-            updates_view = updates_df[["id", "company_name", "status", "updated_at", "next_action", "notes"]]
-            render_dynamic_table(updates_view, "Latest Prospect Updates", key=f"{label}_updates", max_rows=120)
-            st.download_button(
-                "Download Prospect Updates CSV",
-                data=csv_bytes(updates_view),
-                file_name=f"prospect_updates_{label.lower()}.csv",
-                mime="text/csv",
-            )
-
-        st.markdown("##### Activities Completed")
-        if activities_df.empty:
-            st.info("No tracked activities in this period.")
-        else:
-            activities_view = activities_df[
-                ["activity_id", "activity_type", "company_name", "details", "product_name", "amount", "activity_date", "status"]
-            ]
-            render_dynamic_table(activities_view, "Activities Completed", key=f"{label}_activities", max_rows=120)
-            st.download_button(
-                "Download Activities CSV",
-                data=csv_bytes(activities_view),
-                file_name=f"activities_{label.lower()}.csv",
-                mime="text/csv",
-            )
-
-        st.markdown("##### Won Projects and Commercial Details")
-        if won_detail_df.empty:
-            st.info("No projects marked as Won in this period.")
-        else:
-            render_dynamic_table(won_detail_df, "Won Projects", key=f"{label}_won", max_rows=120)
-            st.download_button(
-                "Download Won Projects CSV",
-                data=csv_bytes(won_detail_df),
-                file_name=f"won_projects_{label.lower()}.csv",
-                mime="text/csv",
-            )
-
-    st.markdown("</div>", unsafe_allow_html=True)
+        connected_view = connected_df[
+            ["id", "company_name", "contact_name", "status", "connected_at", "next_action", "estimated_value"]
+        ]
+        render_dynamic_table(connected_view, "Connected Leads", key=f"{label}_connected", max_rows=120)
 
 
 def save_report_bundle_to_downloads(
@@ -4513,7 +4272,35 @@ def reports_view(data: dict[str, Any]) -> None:
     render_workspace_hero(
         "Workspace",
         "Weekly and Monthly Reports",
-        "Generate executive-grade reporting packs for pipeline movement, proposal activity, and tactical follow-up.",
+        "Clean executive reporting for weekly and monthly performance with one-click premium PDF generation.",
+    )
+
+    st.markdown(
+        """
+        <style>
+            .report-action-panel {
+                border: 1px solid rgba(16, 61, 85, 0.14);
+                border-radius: 16px;
+                padding: 14px;
+                background: linear-gradient(145deg, rgba(255,255,255,0.94), rgba(239,248,255,0.95));
+                box-shadow: 0 10px 22px rgba(10, 34, 50, 0.08);
+                margin: 8px 0 14px;
+            }
+            .report-log-label {
+                font-size: 0.82rem;
+                text-transform: uppercase;
+                letter-spacing: 0.09em;
+                color: #2a5878;
+                font-weight: 700;
+            }
+            .report-log-value {
+                font-size: 1rem;
+                color: #10283b;
+                font-weight: 600;
+            }
+        </style>
+        """,
+        unsafe_allow_html=True,
     )
 
     current_day = date.today()
@@ -4540,8 +4327,21 @@ def reports_view(data: dict[str, Any]) -> None:
         st.caption("Weekly reports use business week range: Monday to Friday.")
         st.write(f"Period: {active_week_start} to {active_week_end}")
         render_period_report(data, active_week_start, active_week_end, "weekly")
-        st.caption("Generate a single premium weekly executive PDF in your local Downloads/crm_reports folder.")
-        if st.button("Generate Weekly Executive PDF", width="stretch"):
+
+        weekly_generated = st.session_state.get("weekly_report_generated_date", "-")
+        weekly_downloaded = st.session_state.get("weekly_report_downloaded_date", "-")
+        st.markdown(
+            f"""
+            <div class='report-action-panel'>
+                <div class='report-log-label'>Logs</div>
+                <div class='report-log-value'>Generated: {html.escape(str(weekly_generated))}</div>
+                <div class='report-log-value'>Downloaded: {html.escape(str(weekly_downloaded))}</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        if st.button("Generate Weekly Premium Report", width="stretch"):
             try:
                 run_key = f"{active_week_start}_{active_week_end}"
                 last_key = st.session_state.get("last_weekly_pdf_key", "")
@@ -4554,15 +4354,42 @@ def reports_view(data: dict[str, Any]) -> None:
                     out_path = save_weekly_executive_pdf_to_downloads(data, active_week_start, active_week_end)
                     st.session_state["last_weekly_pdf_key"] = run_key
                     st.session_state["last_weekly_pdf_at"] = now_time
+                    st.session_state["weekly_report_path"] = str(out_path)
+                    st.session_state["weekly_report_generated_date"] = today_iso()
                     st.success(f"Weekly executive PDF generated: {out_path}")
             except Exception as exc:
                 st.error(f"Could not generate weekly executive PDF: {exc}")
 
+        weekly_path = st.session_state.get("weekly_report_path", "")
+        if weekly_path and Path(weekly_path).exists():
+            weekly_bytes = Path(weekly_path).read_bytes()
+            if st.download_button(
+                "Download Weekly Premium Report",
+                data=weekly_bytes,
+                file_name=Path(weekly_path).name,
+                mime="application/pdf",
+                width="stretch",
+            ):
+                st.session_state["weekly_report_downloaded_date"] = today_iso()
+
     with mtab:
         st.write(f"Period: {month_start} to {month_end}")
         render_period_report(data, month_start, month_end, "monthly", combined_view=True)
-        st.caption("Generate a single premium monthly executive PDF in your local Downloads/crm_reports folder.")
-        if st.button("Generate Monthly Executive PDF", width="stretch"):
+
+        monthly_generated = st.session_state.get("monthly_report_generated_date", "-")
+        monthly_downloaded = st.session_state.get("monthly_report_downloaded_date", "-")
+        st.markdown(
+            f"""
+            <div class='report-action-panel'>
+                <div class='report-log-label'>Logs</div>
+                <div class='report-log-value'>Generated: {html.escape(str(monthly_generated))}</div>
+                <div class='report-log-value'>Downloaded: {html.escape(str(monthly_downloaded))}</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        if st.button("Generate Monthly Premium Report", width="stretch"):
             try:
                 run_key = f"{month_start}_{month_end}"
                 last_key = st.session_state.get("last_monthly_pdf_key", "")
@@ -4575,9 +4402,23 @@ def reports_view(data: dict[str, Any]) -> None:
                     out_path = save_monthly_executive_pdf_to_downloads(data, month_start, month_end)
                     st.session_state["last_monthly_pdf_key"] = run_key
                     st.session_state["last_monthly_pdf_at"] = now_time
+                    st.session_state["monthly_report_path"] = str(out_path)
+                    st.session_state["monthly_report_generated_date"] = today_iso()
                     st.success(f"Monthly executive PDF generated: {out_path}")
             except Exception as exc:
                 st.error(f"Could not generate monthly executive PDF: {exc}")
+
+        monthly_path = st.session_state.get("monthly_report_path", "")
+        if monthly_path and Path(monthly_path).exists():
+            monthly_bytes = Path(monthly_path).read_bytes()
+            if st.download_button(
+                "Download Monthly Premium Report",
+                data=monthly_bytes,
+                file_name=Path(monthly_path).name,
+                mime="application/pdf",
+                width="stretch",
+            ):
+                st.session_state["monthly_report_downloaded_date"] = today_iso()
 
 
 def main() -> None:
