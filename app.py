@@ -10,6 +10,8 @@ from datetime import date, datetime, timezone
 from datetime import timedelta
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote_plus, urlparse
+from urllib.request import Request, urlopen
 
 import altair as alt
 import pandas as pd
@@ -2836,191 +2838,289 @@ def global_search_view(data: dict[str, Any]) -> None:
     render_workspace_hero(
         "Workspace",
         "Global Search",
-        "Search across leads, customers, quotations, drawings, purchase orders, and activity in one place.",
+        "Search CRM records and generate new global leads by country with optional GPT qualification.",
     )
 
+    st.markdown("### Internal CRM Search")
     query = st.text_input(
-        "Search everything",
+        "Search existing CRM data",
         placeholder="Try company name, LEAD ID, DRW ID, quote ID, PO number, or product...",
     ).strip()
     entity_options = ["Prospects", "Customers", "Quotations", "Technical Drawings", "Purchase Orders", "Activity"]
     selected_entities = st.multiselect("Include entities", entity_options, default=entity_options)
 
-    if not query:
-        st.info("Enter a keyword to run global search.")
-        return
+    if query:
+        q = query.lower()
+        results: list[dict[str, str]] = []
 
-    q = query.lower()
-    results: list[dict[str, str]] = []
+        def add_result(entity: str, item_id: str, company: str, summary: str, status: str, item_date: str, workspace: str) -> None:
+            results.append(
+                {
+                    "entity": entity,
+                    "record_id": item_id,
+                    "company_name": company,
+                    "summary": summary,
+                    "status": status,
+                    "date": item_date,
+                    "open_in": workspace,
+                }
+            )
 
-    def add_result(entity: str, item_id: str, company: str, summary: str, status: str, item_date: str, workspace: str) -> None:
-        results.append(
-            {
-                "entity": entity,
-                "record_id": item_id,
-                "company_name": company,
-                "summary": summary,
-                "status": status,
-                "date": item_date,
-                "open_in": workspace,
-            }
+        if "Prospects" in selected_entities:
+            for p in data.get("prospects", []):
+                blob = " | ".join(
+                    [
+                        str(p.get("id", "")),
+                        str(p.get("company_name", "")),
+                        str(p.get("contact_name", "")),
+                        str(p.get("email", "")),
+                        str(p.get("phone", "")),
+                        str(p.get("status", "")),
+                        str(p.get("notes", "")),
+                    ]
+                ).lower()
+                if q in blob:
+                    add_result(
+                        "Prospect",
+                        str(p.get("id", "")),
+                        str(p.get("company_name", "")),
+                        str(p.get("next_action", "")) or "Lead matched",
+                        str(p.get("status", "")),
+                        str(p.get("updated_at", "")),
+                        "Prospects",
+                    )
+
+        if "Customers" in selected_entities:
+            for c in data.get("customers", []):
+                blob = " | ".join(
+                    [
+                        str(c.get("id", "")),
+                        str(c.get("company_name", "")),
+                        str(c.get("contact_name", "")),
+                        str(c.get("email", "")),
+                        str(c.get("phone", "")),
+                        str(c.get("industry", "")),
+                    ]
+                ).lower()
+                if q in blob:
+                    add_result(
+                        "Customer",
+                        str(c.get("id", "")),
+                        str(c.get("company_name", "")),
+                        str(c.get("contact_name", "")) or "Customer matched",
+                        str(c.get("lifecycle_stage", "")),
+                        str(c.get("last_contact", "")),
+                        "Customers",
+                    )
+
+        if "Quotations" in selected_entities:
+            for quote in data.get("quotations", []):
+                blob = " | ".join(
+                    [
+                        str(quote.get("id", "")),
+                        str(quote.get("customer_name", "")),
+                        str(quote.get("product_name", "")),
+                        str(quote.get("status", "")),
+                        str(quote.get("quote_value", "")),
+                    ]
+                ).lower()
+                if q in blob:
+                    add_result(
+                        "Quotation",
+                        str(quote.get("id", "")),
+                        str(quote.get("customer_name", "")),
+                        str(quote.get("product_name", "")) or "Quotation matched",
+                        str(quote.get("status", "")),
+                        str(quote.get("created_date", "")),
+                        "Quotations",
+                    )
+
+        if "Technical Drawings" in selected_entities:
+            for drawing in data.get("technical_drawings", []):
+                blob = " | ".join(
+                    [
+                        str(drawing.get("id", "")),
+                        str(drawing.get("company_name", "")),
+                        str(drawing.get("drawing_title", "")),
+                        str(drawing.get("file_name", "")),
+                        str(drawing.get("drawing_type", "")),
+                        ",".join(normalize_linked_ids(drawing.get("linked_quote_ids", []))),
+                    ]
+                ).lower()
+                if q in blob:
+                    add_result(
+                        "Technical Drawing",
+                        str(drawing.get("id", "")),
+                        str(drawing.get("company_name", "")),
+                        str(drawing.get("drawing_title", "")) or str(drawing.get("file_name", "")),
+                        str(drawing.get("drawing_type", "")),
+                        str(drawing.get("uploaded_at", "")),
+                        "Technical Drawings",
+                    )
+
+        if "Purchase Orders" in selected_entities:
+            for po in data.get("purchase_orders", []):
+                blob = " | ".join(
+                    [
+                        str(po.get("id", "")),
+                        str(po.get("po_number", "")),
+                        str(po.get("company_name", "")),
+                        str(po.get("status", "")),
+                        str(po.get("po_value", "")),
+                    ]
+                ).lower()
+                if q in blob:
+                    add_result(
+                        "Purchase Order",
+                        str(po.get("id", "")),
+                        str(po.get("company_name", "")),
+                        str(po.get("po_number", "")) or "PO matched",
+                        str(po.get("status", "")),
+                        str(po.get("po_date", "")),
+                        "Purchase Orders",
+                    )
+
+        if "Activity" in selected_entities:
+            for activity in data.get("activity_log", []):
+                blob = " | ".join(
+                    [
+                        str(activity.get("activity_type", "")),
+                        str(activity.get("company_name", "")),
+                        str(activity.get("details", "")),
+                        str(activity.get("status", "")),
+                        str(activity.get("entity_id", "")),
+                    ]
+                ).lower()
+                if q in blob:
+                    add_result(
+                        "Activity",
+                        str(activity.get("entity_id", "")),
+                        str(activity.get("company_name", "")),
+                        str(activity.get("details", "")) or str(activity.get("activity_type", "")),
+                        str(activity.get("status", "")),
+                        str(activity.get("activity_date", "")),
+                        str(activity.get("entity_type", "")).title() + " Workspace",
+                    )
+
+        if not results:
+            st.warning("No matching records found in existing CRM data.")
+        else:
+            results_df = pd.DataFrame(results)
+            render_dynamic_table(
+                results_df,
+                f"Global Search Results ({len(results_df)})",
+                key="global_search_results",
+                max_rows=max(1, len(results_df)),
+                strict_columns=True,
+            )
+            st.download_button(
+                "Export Search Results CSV",
+                data=csv_bytes(results_df),
+                file_name=f"global_search_{today_iso()}.csv",
+                mime="text/csv",
+                width="stretch",
+            )
+    else:
+        st.info("Type a keyword above to search existing CRM records.")
+
+    st.markdown("---")
+    st.markdown("### AI Global Lead Generation")
+    st.caption("Discover new companies from the web by niche and country, optionally qualify with GPT, then add selected ones directly to Prospects.")
+
+    g1, g2, g3 = st.columns(3)
+    niche = g1.text_input("Target Product / Niche", value="LV panel builders")
+    country = g2.text_input("Country", value="Kuwait")
+    max_results = int(g3.number_input("Max Leads", min_value=5, max_value=30, value=12, step=1))
+    use_gpt = st.toggle("Use GPT qualification (requires OPENAI_API_KEY secret)", value=True)
+
+    if st.button("Find Global Leads", width="stretch"):
+        if not niche.strip() or not country.strip():
+            st.error("Please enter both niche and country.")
+        else:
+            with st.spinner("Discovering and qualifying leads..."):
+                candidates = _discover_web_leads(niche.strip(), country.strip(), max_results=max_results)
+                if use_gpt:
+                    candidates = _enrich_leads_with_gpt(candidates, niche.strip(), country.strip())
+                for item in candidates:
+                    item["select"] = True
+                st.session_state["ai_lead_candidates"] = candidates
+
+    ai_candidates = st.session_state.get("ai_lead_candidates", [])
+    if ai_candidates:
+        candidate_df = pd.DataFrame(ai_candidates)
+        preferred_cols = [
+            c
+            for c in ["select", "company_name", "country", "website", "reason_fit", "contact_hint", "confidence", "source"]
+            if c in candidate_df.columns
+        ]
+        edited_df = st.data_editor(
+            candidate_df[preferred_cols],
+            width="stretch",
+            hide_index=True,
+            num_rows="dynamic",
+            key="ai_lead_editor",
         )
 
-    if "Prospects" in selected_entities:
-        for p in data.get("prospects", []):
-            blob = " | ".join(
-                [
-                    str(p.get("id", "")),
-                    str(p.get("company_name", "")),
-                    str(p.get("contact_name", "")),
-                    str(p.get("email", "")),
-                    str(p.get("phone", "")),
-                    str(p.get("status", "")),
-                    str(p.get("notes", "")),
-                ]
-            ).lower()
-            if q in blob:
-                add_result(
-                    "Prospect",
-                    str(p.get("id", "")),
-                    str(p.get("company_name", "")),
-                    str(p.get("next_action", "")) or "Lead matched",
-                    str(p.get("status", "")),
-                    str(p.get("updated_at", "")),
-                    "Prospects",
+        if st.button("Add Selected Leads to Prospects", width="stretch"):
+            selected_rows = edited_df[edited_df.get("select", False) == True] if "select" in edited_df.columns else edited_df
+            existing_names = {str(p.get("company_name", "")).strip().lower() for p in data.get("prospects", [])}
+            existing_ids = [p.get("id", "") for p in data.get("prospects", [])]
+
+            added = 0
+            skipped = 0
+            for _, row in selected_rows.iterrows():
+                company_name = str(row.get("company_name", "")).strip()
+                if not company_name:
+                    skipped += 1
+                    continue
+                if company_name.lower() in existing_names:
+                    skipped += 1
+                    continue
+
+                website = str(row.get("website", "")).strip()
+                reason_fit = str(row.get("reason_fit", "")).strip()
+                contact_hint = str(row.get("contact_hint", "")).strip()
+                source = str(row.get("source", "AI Lead Discovery")).strip()
+                new_id = next_id("LEAD", existing_ids)
+                existing_ids.append(new_id)
+
+                new_prospect = {
+                    "id": new_id,
+                    "customer_id": "",
+                    "company_name": company_name,
+                    "contact_name": "",
+                    "email": "",
+                    "phone": "",
+                    "source": source,
+                    "industry": "",
+                    "product_interest": niche.strip(),
+                    "estimated_value": 0.0,
+                    "status": "New Lead",
+                    "expected_close_date": str(date.today() + timedelta(days=45)),
+                    "next_action": "Initial outreach and qualification",
+                    "notes": f"Website: {website} | Reason: {reason_fit} | Contact hint: {contact_hint}",
+                    "created_at": now_stamp(),
+                    "updated_at": now_stamp(),
+                    "connected_at": "",
+                }
+                data["prospects"].append(new_prospect)
+                existing_names.add(company_name.lower())
+                added += 1
+
+                log_activity(
+                    data,
+                    activity_type="Prospect Added",
+                    entity_type="prospect",
+                    entity_id=new_id,
+                    company_name=company_name,
+                    details=f"AI lead generation: {country.strip()} | {niche.strip()}",
+                    status="New Lead",
                 )
 
-    if "Customers" in selected_entities:
-        for c in data.get("customers", []):
-            blob = " | ".join(
-                [
-                    str(c.get("id", "")),
-                    str(c.get("company_name", "")),
-                    str(c.get("contact_name", "")),
-                    str(c.get("email", "")),
-                    str(c.get("phone", "")),
-                    str(c.get("industry", "")),
-                ]
-            ).lower()
-            if q in blob:
-                add_result(
-                    "Customer",
-                    str(c.get("id", "")),
-                    str(c.get("company_name", "")),
-                    str(c.get("contact_name", "")) or "Customer matched",
-                    str(c.get("lifecycle_stage", "")),
-                    str(c.get("last_contact", "")),
-                    "Customers",
-                )
-
-    if "Quotations" in selected_entities:
-        for quote in data.get("quotations", []):
-            blob = " | ".join(
-                [
-                    str(quote.get("id", "")),
-                    str(quote.get("customer_name", "")),
-                    str(quote.get("product_name", "")),
-                    str(quote.get("status", "")),
-                    str(quote.get("quote_value", "")),
-                ]
-            ).lower()
-            if q in blob:
-                add_result(
-                    "Quotation",
-                    str(quote.get("id", "")),
-                    str(quote.get("customer_name", "")),
-                    str(quote.get("product_name", "")) or "Quotation matched",
-                    str(quote.get("status", "")),
-                    str(quote.get("created_date", "")),
-                    "Quotations",
-                )
-
-    if "Technical Drawings" in selected_entities:
-        for drawing in data.get("technical_drawings", []):
-            blob = " | ".join(
-                [
-                    str(drawing.get("id", "")),
-                    str(drawing.get("company_name", "")),
-                    str(drawing.get("drawing_title", "")),
-                    str(drawing.get("file_name", "")),
-                    str(drawing.get("drawing_type", "")),
-                    ",".join(normalize_linked_ids(drawing.get("linked_quote_ids", []))),
-                ]
-            ).lower()
-            if q in blob:
-                add_result(
-                    "Technical Drawing",
-                    str(drawing.get("id", "")),
-                    str(drawing.get("company_name", "")),
-                    str(drawing.get("drawing_title", "")) or str(drawing.get("file_name", "")),
-                    str(drawing.get("drawing_type", "")),
-                    str(drawing.get("uploaded_at", "")),
-                    "Technical Drawings",
-                )
-
-    if "Purchase Orders" in selected_entities:
-        for po in data.get("purchase_orders", []):
-            blob = " | ".join(
-                [
-                    str(po.get("id", "")),
-                    str(po.get("po_number", "")),
-                    str(po.get("company_name", "")),
-                    str(po.get("status", "")),
-                    str(po.get("po_value", "")),
-                ]
-            ).lower()
-            if q in blob:
-                add_result(
-                    "Purchase Order",
-                    str(po.get("id", "")),
-                    str(po.get("company_name", "")),
-                    str(po.get("po_number", "")) or "PO matched",
-                    str(po.get("status", "")),
-                    str(po.get("po_date", "")),
-                    "Purchase Orders",
-                )
-
-    if "Activity" in selected_entities:
-        for activity in data.get("activity_log", []):
-            blob = " | ".join(
-                [
-                    str(activity.get("activity_type", "")),
-                    str(activity.get("company_name", "")),
-                    str(activity.get("details", "")),
-                    str(activity.get("status", "")),
-                    str(activity.get("entity_id", "")),
-                ]
-            ).lower()
-            if q in blob:
-                add_result(
-                    "Activity",
-                    str(activity.get("entity_id", "")),
-                    str(activity.get("company_name", "")),
-                    str(activity.get("details", "")) or str(activity.get("activity_type", "")),
-                    str(activity.get("status", "")),
-                    str(activity.get("activity_date", "")),
-                    str(activity.get("entity_type", "")).title() + " Workspace",
-                )
-
-    if not results:
-        st.warning("No matching records found.")
-        return
-
-    results_df = pd.DataFrame(results)
-    render_dynamic_table(
-        results_df,
-        f"Global Search Results ({len(results_df)})",
-        key="global_search_results",
-        max_rows=max(1, len(results_df)),
-        strict_columns=True,
-    )
-    st.download_button(
-        "Export Search Results CSV",
-        data=csv_bytes(results_df),
-        file_name=f"global_search_{today_iso()}.csv",
-        mime="text/csv",
-        width="stretch",
-    )
+            if added > 0:
+                save_data_and_refresh(data)
+            else:
+                st.warning(f"No new leads added. Skipped {skipped} duplicate/invalid rows.")
 
 
 def lead_360_view(data: dict[str, Any]) -> None:
@@ -3276,6 +3376,118 @@ def followups_view(data: dict[str, Any]) -> None:
                     )
                     break
             save_data_and_refresh(data)
+
+
+def _discover_web_leads(niche: str, country: str, max_results: int = 15) -> list[dict[str, str]]:
+    search_query = f"{niche} in {country}"
+    url = f"https://duckduckgo.com/html/?q={quote_plus(search_query)}"
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0 Safari/537.36"
+    }
+    req = Request(url, headers=headers)
+
+    try:
+        with urlopen(req, timeout=20) as resp:
+            page = resp.read().decode("utf-8", errors="ignore")
+    except Exception:
+        return []
+
+    links = re.findall(r'<a[^>]*class="result__a"[^>]*href="([^"]+)"[^>]*>(.*?)</a>', page, flags=re.IGNORECASE | re.DOTALL)
+    snippets = re.findall(r'<a[^>]*class="result__snippet"[^>]*>(.*?)</a>', page, flags=re.IGNORECASE | re.DOTALL)
+
+    results: list[dict[str, str]] = []
+    for idx, (href, raw_title) in enumerate(links[:max_results]):
+        cleaned_title = re.sub(r"<.*?>", "", raw_title)
+        cleaned_title = html.unescape(cleaned_title).strip()
+        website = href.strip()
+        domain = urlparse(website).netloc.replace("www.", "") if website else ""
+        snippet = ""
+        if idx < len(snippets):
+            snippet = html.unescape(re.sub(r"<.*?>", "", snippets[idx])).strip()
+
+        company_name = cleaned_title.split("|")[0].split("-")[0].strip() or domain or "Potential Lead"
+        results.append(
+            {
+                "company_name": company_name,
+                "website": website,
+                "country": country,
+                "reason_fit": snippet or f"Matches query: {search_query}",
+                "contact_hint": "",
+                "source": f"AI Lead Discovery ({search_query})",
+            }
+        )
+    return results
+
+
+def _enrich_leads_with_gpt(raw_leads: list[dict[str, str]], niche: str, country: str) -> list[dict[str, str]]:
+    api_key = _get_secret_or_env("OPENAI_API_KEY")
+    model = _get_secret_or_env("OPENAI_MODEL", "gpt-4o-mini") or "gpt-4o-mini"
+    if not api_key or not raw_leads:
+        return raw_leads
+
+    compact_input = [
+        {
+            "company_name": x.get("company_name", ""),
+            "website": x.get("website", ""),
+            "reason_fit": x.get("reason_fit", ""),
+        }
+        for x in raw_leads[:20]
+    ]
+
+    payload = {
+        "model": model,
+        "response_format": {"type": "json_object"},
+        "messages": [
+            {
+                "role": "system",
+                "content": (
+                    "You are a B2B lead qualification analyst. Return strict JSON with a single key 'leads'. "
+                    "Each item must include: company_name, website, country, reason_fit, contact_hint, confidence_score (0-100)."
+                ),
+            },
+            {
+                "role": "user",
+                "content": (
+                    f"Target niche: {niche}. Country: {country}. "
+                    "From these web candidates, keep only relevant companies and improve quality. Candidates: "
+                    + json.dumps(compact_input)
+                ),
+            },
+        ],
+    }
+
+    req = Request(
+        "https://api.openai.com/v1/chat/completions",
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+
+    try:
+        with urlopen(req, timeout=35) as resp:
+            response_data = json.loads(resp.read().decode("utf-8", errors="ignore"))
+        content = response_data.get("choices", [{}])[0].get("message", {}).get("content", "{}")
+        parsed = json.loads(content)
+        leads = parsed.get("leads", [])
+        normalized: list[dict[str, str]] = []
+        for lead in leads:
+            normalized.append(
+                {
+                    "company_name": str(lead.get("company_name", "")).strip(),
+                    "website": str(lead.get("website", "")).strip(),
+                    "country": str(lead.get("country", country)).strip() or country,
+                    "reason_fit": str(lead.get("reason_fit", "")).strip(),
+                    "contact_hint": str(lead.get("contact_hint", "")).strip(),
+                    "source": f"GPT Qualified ({niche} | {country})",
+                    "confidence": str(lead.get("confidence_score", "")),
+                }
+            )
+        return [x for x in normalized if x.get("company_name", "")]
+    except Exception:
+        return raw_leads
 
 
 def insights_view(data: dict[str, list[dict[str, Any]]]) -> None:
