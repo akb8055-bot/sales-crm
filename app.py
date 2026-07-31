@@ -1799,23 +1799,6 @@ def dashboard(data: dict[str, list[dict[str, Any]]]) -> None:
         """,
         unsafe_allow_html=True,
     )
-    st.caption(f"Release: {APP_RELEASE}")
-
-    supabase_connected = _is_supabase_enabled()
-    data_source_label = "Supabase Cloud" if supabase_connected else "Local File Fallback"
-    row_id = _get_secret_or_env("SUPABASE_ROW_ID", SUPABASE_ROW_ID) or SUPABASE_ROW_ID
-    table_name = _get_secret_or_env("SUPABASE_TABLE", SUPABASE_TABLE) or SUPABASE_TABLE
-    st.markdown(
-        f"""
-        <div class='status-strip'>
-            <div class='status-pill'><span class='label'>Data Source</span><span class='value'>{html.escape(data_source_label)}</span></div>
-            <div class='status-pill'><span class='label'>Table</span><span class='value'>{html.escape(table_name)}</span></div>
-            <div class='status-pill'><span class='label'>Row</span><span class='value'>{html.escape(row_id)}</span></div>
-            <div class='status-pill'><span class='label'>Last Refresh</span><span class='value'>{html.escape(today_iso())}</span></div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
 
     st.markdown(
         f"""
