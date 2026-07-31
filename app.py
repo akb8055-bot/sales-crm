@@ -1795,6 +1795,22 @@ def dashboard(data: dict[str, list[dict[str, Any]]]) -> None:
     )
     st.caption(f"Release: {APP_RELEASE}")
 
+    supabase_connected = _is_supabase_enabled()
+    data_source_label = "Supabase Cloud" if supabase_connected else "Local File Fallback"
+    row_id = _get_secret_or_env("SUPABASE_ROW_ID", SUPABASE_ROW_ID) or SUPABASE_ROW_ID
+    table_name = _get_secret_or_env("SUPABASE_TABLE", SUPABASE_TABLE) or SUPABASE_TABLE
+    st.markdown(
+        f"""
+        <div class='status-strip'>
+            <div class='status-pill'><span class='label'>Data Source</span><span class='value'>{html.escape(data_source_label)}</span></div>
+            <div class='status-pill'><span class='label'>Table</span><span class='value'>{html.escape(table_name)}</span></div>
+            <div class='status-pill'><span class='label'>Row</span><span class='value'>{html.escape(row_id)}</span></div>
+            <div class='status-pill'><span class='label'>Last Refresh</span><span class='value'>{html.escape(today_iso())}</span></div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
     st.markdown(
         f"""
         <div class='dashboard-grid'>
@@ -3001,6 +3017,150 @@ def global_search_view(data: dict[str, Any]) -> None:
         mime="text/csv",
         width="stretch",
     )
+
+
+def lead_360_view(data: dict[str, Any]) -> None:
+    render_workspace_hero(
+        "Workspace",
+        "Lead 360",
+        "Get one complete company timeline with activities, quotations, drawings, purchase orders, and shared files.",
+    )
+
+    prospects = data.get("prospects", [])
+    if not prospects:
+        st.info("No prospects available yet.")
+        return
+
+    lead_options = {f"{p.get('id', '')} | {p.get('company_name', '')}": p for p in prospects}
+    selected_label = st.selectbox("Select Lead", list(lead_options.keys()), key="lead_360_select")
+    lead = lead_options[selected_label]
+    lead_id = lead.get("id", "")
+    lead_name = lead.get("company_name", "")
+
+    quotes = [q for q in data.get("quotations", []) if q.get("prospect_id", "") == lead_id]
+    drawings = [d for d in data.get("technical_drawings", []) if d.get("prospect_id", "") == lead_id]
+    purchase_orders = [po for po in data.get("purchase_orders", []) if po.get("prospect_id", "") == lead_id]
+    activities = [a for a in data.get("activity_log", []) if a.get("entity_id", "") == lead_id]
+    uploaded_files = data.get("prospect_attachments", {}).get(lead_id, [])
+
+    total_quote_value = sum(float(q.get("quote_value", 0) or 0) for q in quotes)
+    total_po_value = sum(float(po.get("po_value", 0) or 0) for po in purchase_orders)
+
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Lead Status", str(lead.get("status", "")))
+    m2.metric("Quotations", len(quotes))
+    m3.metric("Quoted Value", f"AED {total_quote_value:,.0f}")
+    m4.metric("PO Value", f"AED {total_po_value:,.0f}")
+
+    timeline_rows: list[dict[str, str]] = []
+
+    def add_timeline(event_date: str, source: str, event: str, details: str, status: str = "", amount: float = 0.0) -> None:
+        timeline_rows.append(
+            {
+                "date": str(event_date or ""),
+                "source": source,
+                "event": event,
+                "details": details,
+                "status": status,
+                "amount": f"AED {float(amount or 0):,.0f}" if float(amount or 0) > 0 else "",
+            }
+        )
+
+    add_timeline(str(lead.get("created_at", "")), "Prospect", "Lead Created", f"{lead_name} added to CRM", str(lead.get("status", "")))
+    if lead.get("connected_at", ""):
+        add_timeline(str(lead.get("connected_at", "")), "Prospect", "Lead Connected", "Moved into connected pipeline", str(lead.get("status", "")))
+    add_timeline(str(lead.get("updated_at", "")), "Prospect", "Latest Lead Update", str(lead.get("next_action", "")) or "Lead details updated", str(lead.get("status", "")))
+
+    for quote in quotes:
+        add_timeline(
+            str(quote.get("created_date", "")),
+            "Quotation",
+            str(quote.get("id", "")) or "Quotation Created",
+            str(quote.get("product_name", "")) or "Quotation shared",
+            str(quote.get("status", "")),
+            float(quote.get("quote_value", 0) or 0),
+        )
+
+    for drawing in drawings:
+        add_timeline(
+            str(drawing.get("uploaded_at", "")),
+            "Technical Drawing",
+            str(drawing.get("id", "")) or "Drawing Uploaded",
+            str(drawing.get("drawing_title", "")) or str(drawing.get("file_name", "")),
+            str(drawing.get("drawing_type", "")),
+        )
+
+    for po in purchase_orders:
+        add_timeline(
+            str(po.get("po_date", "")),
+            "Purchase Order",
+            str(po.get("po_number", "")) or str(po.get("id", "")),
+            str(po.get("notes", "")) or "Purchase order recorded",
+            str(po.get("status", "")),
+            float(po.get("po_value", 0) or 0),
+        )
+
+    for file_item in uploaded_files:
+        add_timeline(
+            str(file_item.get("uploaded_at", "")),
+            "Quotation File",
+            str(file_item.get("file_name", "")) or "File Uploaded",
+            f"Linked quotation: {file_item.get('linked_quotation_id', 'Unlinked')}",
+            "Uploaded",
+        )
+
+    for activity in activities:
+        add_timeline(
+            str(activity.get("activity_date", "")),
+            "Activity",
+            str(activity.get("activity_type", "")) or "Activity",
+            str(activity.get("details", "")),
+            str(activity.get("status", "")),
+            float(activity.get("amount", 0) or 0),
+        )
+
+    timeline_df = pd.DataFrame(timeline_rows)
+    if timeline_df.empty:
+        st.info("No timeline events captured for this lead yet.")
+    else:
+        timeline_df["_sort_date"] = timeline_df["date"].apply(lambda x: safe_parse_date(str(x)) or date.min)
+        timeline_df = timeline_df.sort_values("_sort_date", ascending=False).drop(columns=["_sort_date"])
+        render_dynamic_table(
+            timeline_df,
+            f"Lead 360 Timeline | {lead_name}",
+            key="lead_360_timeline",
+            max_rows=max(1, len(timeline_df)),
+            strict_columns=True,
+        )
+
+    st.markdown("### Linked Records")
+    rec1, rec2 = st.columns(2)
+    with rec1:
+        quotes_df = pd.DataFrame(quotes)
+        if quotes_df.empty:
+            st.caption("No quotations linked to this lead.")
+        else:
+            show_cols = [c for c in ["id", "product_name", "quote_value", "status", "created_date"] if c in quotes_df.columns]
+            render_dynamic_table(
+                quotes_df[show_cols],
+                "Lead Quotations",
+                key="lead_360_quotes",
+                max_rows=max(1, len(quotes_df)),
+                strict_columns=True,
+            )
+    with rec2:
+        drawings_df = pd.DataFrame(drawings)
+        if drawings_df.empty:
+            st.caption("No technical drawings linked to this lead.")
+        else:
+            show_cols = [c for c in ["id", "drawing_title", "drawing_type", "revision", "uploaded_at"] if c in drawings_df.columns]
+            render_dynamic_table(
+                drawings_df[show_cols],
+                "Lead Drawings",
+                key="lead_360_drawings",
+                max_rows=max(1, len(drawings_df)),
+                strict_columns=True,
+            )
 
 
 def insights_view(data: dict[str, list[dict[str, Any]]]) -> None:
@@ -4311,6 +4471,7 @@ def main() -> None:
             [
                 "Dashboard",
                 "Global Search",
+                "Lead 360",
                 "Customers",
                 "Prospects",
                 "Technical Drawings",
@@ -4330,6 +4491,8 @@ def main() -> None:
         dashboard(data)
     elif section == "Global Search":
         global_search_view(data)
+    elif section == "Lead 360":
+        lead_360_view(data)
     elif section == "Customers":
         customers_view(data)
     elif section == "Prospects":
