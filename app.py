@@ -922,7 +922,7 @@ def style_app() -> None:
 
 
 def now_stamp() -> str:
-    return datetime.now().strftime("%Y-%m-%d %H:%M")
+    return datetime.now().strftime("%Y-%m-%d")
 
 
 def render_workspace_hero(eyebrow: str, title: str, subtitle: str) -> None:
@@ -941,13 +941,21 @@ def render_workspace_hero(eyebrow: str, title: str, subtitle: str) -> None:
 def _fmt_dynamic_value(value: Any) -> str:
     if value is None:
         return ""
+    if isinstance(value, datetime):
+        return value.strftime("%Y-%m-%d")
+    if isinstance(value, date):
+        return value.isoformat()
     if isinstance(value, float):
         if pd.isna(value):
             return ""
         if value.is_integer():
             return f"{int(value):,}"
         return f"{value:,.2f}"
-    return str(value)
+    text = str(value).strip()
+    parsed = safe_parse_date(text)
+    if parsed and (" " in text or "T" in text or len(text) > 10):
+        return parsed.isoformat()
+    return text
 
 
 def render_dynamic_table(
@@ -2038,11 +2046,47 @@ def prospects_view(data: dict[str, list[dict[str, Any]]]) -> None:
 
         p_df = pd.DataFrame(rows)
         p_df = p_df.drop(columns=["customer_id"], errors="ignore")
+        if "created_at" in p_df.columns:
+            p_df["created_date"] = p_df["created_at"].astype(str).str[:10]
+            p_df = p_df.drop(columns=["created_at"], errors="ignore")
+
+        # Order columns by business priority; keep created_date as the very last column.
+        primary_cols = [
+            "id",
+            "company_name",
+            "contact_name",
+            "phone",
+            "email",
+            "source",
+            "status",
+            "next_action",
+            "notes",
+        ]
+        secondary_cols = [
+            "estimated_value",
+            "expected_close_date",
+            "quote_generated",
+            "quote_product_name",
+            "quote_value",
+            "quotation_files",
+            "industry",
+            "product_interest",
+            "connected_at",
+            "updated_at",
+        ]
+        ordered_cols = [c for c in primary_cols if c in p_df.columns]
+        ordered_cols.extend(c for c in secondary_cols if c in p_df.columns and c not in ordered_cols)
+        ordered_cols.extend(c for c in p_df.columns if c not in ordered_cols)
+        ordered_cols = [c for c in ordered_cols if c != "created_date"]
+        if "created_date" in p_df.columns:
+            ordered_cols.append("created_date")
+        p_df = p_df[ordered_cols]
+
         render_dynamic_table(
             p_df,
             "Live Opportunity Register",
             key="prospects_register",
-            max_rows=90,
+            max_rows=max(1, len(p_df)),
             strict_columns=True,
         )
     else:
