@@ -43,6 +43,7 @@ SAMPLE_DATA = {
     "customers": [],
     "prospects": [],
     "quotations": [],
+    "technical_drawings": [],
     "purchase_orders": [],
     "prospect_attachments": {},
     "customer_attachments": {},
@@ -1085,6 +1086,9 @@ def ensure_schema(data: dict[str, Any]) -> bool:
     if "quotations" not in data:
         data["quotations"] = []
         changed = True
+    if "technical_drawings" not in data or not isinstance(data.get("technical_drawings"), list):
+        data["technical_drawings"] = []
+        changed = True
     if "purchase_orders" not in data or not isinstance(data.get("purchase_orders"), list):
         data["purchase_orders"] = []
         changed = True
@@ -1121,11 +1125,26 @@ def ensure_schema(data: dict[str, Any]) -> bool:
         if quote.get("quote_value") != float(normalized_quote):
             quote["quote_value"] = float(normalized_quote)
             changed = True
+        links = quote.get("linked_drawing_ids", [])
+        if isinstance(links, str):
+            parsed_links = [x.strip() for x in links.split(",") if x.strip()]
+            quote["linked_drawing_ids"] = parsed_links
+            changed = True
+        elif not isinstance(links, list):
+            quote["linked_drawing_ids"] = []
+            changed = True
 
     for po in data["purchase_orders"]:
         normalized_po = pd.to_numeric(pd.Series([po.get("po_value", 0)]), errors="coerce").fillna(0.0).iloc[0]
         if po.get("po_value") != float(normalized_po):
             po["po_value"] = float(normalized_po)
+            changed = True
+
+    for drawing in data["technical_drawings"]:
+        if "uploaded_at" in drawing:
+            drawing["uploaded_at"] = str(drawing.get("uploaded_at", ""))[:10]
+        if "linked_quote_ids" not in drawing or not isinstance(drawing.get("linked_quote_ids"), list):
+            drawing["linked_quote_ids"] = []
             changed = True
 
     return changed
@@ -1201,6 +1220,14 @@ def sanitize_customers(customers: list[dict[str, Any]]) -> list[dict[str, Any]]:
             continue
         cleaned.append(customer)
     return cleaned
+
+
+def normalize_linked_ids(raw: Any) -> list[str]:
+    if isinstance(raw, list):
+        return [str(x).strip() for x in raw if str(x).strip()]
+    if isinstance(raw, str):
+        return [x.strip() for x in raw.split(",") if x.strip()]
+    return []
 
 
 def _parse_money_value(raw_value: str) -> float | None:
@@ -2233,6 +2260,7 @@ def quotations_view(data: dict[str, list[dict[str, Any]]]) -> None:
     )
     quotes = data["quotations"]
     prospects = data["prospects"]
+    drawings = data.get("technical_drawings", [])
     lead_map = {p.get("id", ""): p for p in prospects}
     attachments = data.get("prospect_attachments", {})
 
@@ -2250,6 +2278,10 @@ def quotations_view(data: dict[str, list[dict[str, Any]]]) -> None:
             q_df = pd.DataFrame(quotes)
             if "quote_value" in q_df.columns:
                 q_df["quote_value"] = pd.to_numeric(q_df["quote_value"], errors="coerce").fillna(0.0)
+            if "linked_drawing_ids" in q_df.columns:
+                q_df["linked_drawing_ids"] = q_df["linked_drawing_ids"].apply(
+                    lambda x: ", ".join(normalize_linked_ids(x))
+                )
             q_df_view = q_df.drop(columns=["customer_id"], errors="ignore")
             render_dynamic_table(
                 q_df_view,
@@ -2267,6 +2299,7 @@ def quotations_view(data: dict[str, list[dict[str, Any]]]) -> None:
                     existing_customer_ids = {q.get("id", ""): q.get("customer_id", "") for q in data["quotations"]}
                     for row in edited_records:
                         row["customer_id"] = existing_customer_ids.get(row.get("id", ""), "")
+                        row["linked_drawing_ids"] = normalize_linked_ids(row.get("linked_drawing_ids", []))
                     data["quotations"] = edited_records
                     save_data_and_refresh(data)
         else:
@@ -2277,6 +2310,7 @@ def quotations_view(data: dict[str, list[dict[str, Any]]]) -> None:
                 lead_options = {f"{p['id']} | {p['company_name']} ({p['status']})": p for p in prospects}
                 selected_label = st.selectbox("Prospect", list(lead_options.keys()) if lead_options else ["No prospects available"])
                 selected_lead = lead_options.get(selected_label)
+                drawings_for_lead = [d for d in drawings if d.get("prospect_id") == selected_lead.get("id", "")] if selected_lead else []
 
                 c1, c2, c3 = st.columns(3)
                 product = c1.text_input("Product Name*")
@@ -2286,6 +2320,17 @@ def quotations_view(data: dict[str, list[dict[str, Any]]]) -> None:
                 d1, d2 = st.columns(2)
                 quote_status = d1.selectbox("Quote Status", QUOTE_STATUSES)
                 valid_until = d2.date_input("Valid Until", value=date.today())
+
+                drawing_labels = {
+                    f"{d.get('id', '')} | {d.get('drawing_title', '') or d.get('file_name', '')} | {d.get('revision', 'r0')}": d.get("id", "")
+                    for d in drawings_for_lead
+                }
+                selected_drawing_labels = st.multiselect(
+                    "Link Technical Drawing IDs",
+                    list(drawing_labels.keys()),
+                    help="Attach one or more mapped technical drawings for this quotation.",
+                )
+                selected_drawing_ids = [drawing_labels[label] for label in selected_drawing_labels]
 
                 notes = st.text_area("Commercial Notes")
                 submitted = st.form_submit_button("Create Quotation", width="stretch")
@@ -2307,8 +2352,16 @@ def quotations_view(data: dict[str, list[dict[str, Any]]]) -> None:
                             "created_date": str(date.today()),
                             "valid_until": str(valid_until),
                             "notes": notes,
+                            "linked_drawing_ids": selected_drawing_ids,
                         }
                         data["quotations"].append(new_quote)
+
+                        for drawing in data.get("technical_drawings", []):
+                            if drawing.get("id") in selected_drawing_ids:
+                                linked_quote_ids = normalize_linked_ids(drawing.get("linked_quote_ids", []))
+                                if new_quote["id"] not in linked_quote_ids:
+                                    linked_quote_ids.append(new_quote["id"])
+                                drawing["linked_quote_ids"] = linked_quote_ids
 
                         for p in data["prospects"]:
                             if p["id"] == selected_lead["id"] and p["status"] in {"New Lead", "Contacted", "Qualified"}:
@@ -2323,13 +2376,155 @@ def quotations_view(data: dict[str, list[dict[str, Any]]]) -> None:
                             entity_type="prospect",
                             entity_id=selected_lead["id"],
                             company_name=selected_lead["company_name"],
-                            details=f"Quotation created for {product}",
+                            details=f"Quotation created for {product} | Drawings linked: {len(selected_drawing_ids)}",
                             product_name=product,
                             amount=float(value or 0),
                             status=quote_status,
                         )
 
                         save_data_and_refresh(data)
+
+
+def technical_drawings_view(data: dict[str, Any]) -> None:
+    render_workspace_hero(
+        "Workspace",
+        "Technical Drawings",
+        "Map SLDs and technical files to prospects with unique IDs so quotation references stay traceable at scale.",
+    )
+
+    prospects = data.get("prospects", [])
+    drawings = data.get("technical_drawings", [])
+
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Total Drawings", len(drawings))
+    c2.metric("Mapped Prospects", len({d.get('prospect_id', '') for d in drawings if d.get('prospect_id', '')}))
+    c3.metric("Drawings Linked to Quotes", sum(1 for d in drawings if normalize_linked_ids(d.get("linked_quote_ids", []))))
+
+    if not prospects:
+        st.info("Create prospects first to map technical drawings.")
+        return
+
+    with st.expander("Upload and Map Drawings", expanded=True):
+        lead_options = {f"{p['id']} | {p['company_name']}": p for p in prospects}
+        selected_label = st.selectbox("Map to Prospect", list(lead_options.keys()), key="drawings_prospect_select")
+        selected_prospect = lead_options[selected_label]
+
+        a1, a2, a3 = st.columns(3)
+        drawing_title = a1.text_input("Drawing Title", placeholder="Main SLD - Basement Feeder")
+        drawing_type = a2.selectbox("Drawing Type", ["SLD", "Technical Drawing", "GA", "BOQ", "Other"])
+        revision = a3.text_input("Revision", value="r0")
+
+        notes = st.text_area("Notes", placeholder="Scope, assumptions, latest updates...")
+        uploaded_drawings = st.file_uploader(
+            "Upload Drawing Files",
+            type=["pdf", "dwg", "dxf", "png", "jpg", "jpeg", "svg"],
+            accept_multiple_files=True,
+            key="drawing_uploader",
+        )
+
+        if st.button("Save Drawings", width="stretch"):
+            if not uploaded_drawings:
+                st.warning("Please upload at least one file.")
+            else:
+                existing_ids = [d.get("id", "") for d in drawings]
+                for file_obj in uploaded_drawings:
+                    drawing_id = next_id("DRW", existing_ids)
+                    existing_ids.append(drawing_id)
+                    drawings.append(
+                        {
+                            "id": drawing_id,
+                            "prospect_id": selected_prospect["id"],
+                            "company_name": selected_prospect.get("company_name", ""),
+                            "contact_name": selected_prospect.get("contact_name", ""),
+                            "drawing_title": drawing_title or file_obj.name,
+                            "drawing_type": drawing_type,
+                            "revision": revision,
+                            "file_name": file_obj.name,
+                            "mime_type": file_obj.type or "application/octet-stream",
+                            "size_kb": round((getattr(file_obj, "size", 0) or 0) / 1024, 1),
+                            "uploaded_at": today_iso(),
+                            "notes": notes,
+                            "content_b64": base64.b64encode(file_obj.getvalue()).decode("ascii"),
+                            "linked_quote_ids": [],
+                        }
+                    )
+                    log_activity(
+                        data,
+                        activity_type="Technical Drawing Uploaded",
+                        entity_type="prospect",
+                        entity_id=selected_prospect["id"],
+                        company_name=selected_prospect.get("company_name", ""),
+                        details=f"{drawing_id} uploaded ({file_obj.name})",
+                        status=drawing_type,
+                    )
+                save_data_and_refresh(data)
+
+    if not drawings:
+        st.info("No technical drawings uploaded yet.")
+        return
+
+    d_df = pd.DataFrame(drawings)
+    show_cols = [
+        c
+        for c in [
+            "id",
+            "company_name",
+            "prospect_id",
+            "drawing_title",
+            "drawing_type",
+            "revision",
+            "file_name",
+            "uploaded_at",
+            "linked_quote_ids",
+            "notes",
+        ]
+        if c in d_df.columns
+    ]
+    if "linked_quote_ids" in d_df.columns:
+        d_df["linked_quote_ids"] = d_df["linked_quote_ids"].apply(lambda x: ", ".join(normalize_linked_ids(x)))
+
+    render_dynamic_table(
+        d_df[show_cols],
+        "Technical Drawings Register",
+        key="technical_drawings_register",
+        max_rows=max(1, len(d_df)),
+        strict_columns=True,
+    )
+
+    draw_options = {
+        f"{d.get('id', '')} | {d.get('company_name', '')} | {d.get('file_name', '')}": d.get("id", "")
+        for d in drawings
+    }
+    selected_label = st.selectbox("Select technical drawing", list(draw_options.keys()), key="drawing_file_pick")
+    selected_id = draw_options[selected_label]
+    selected_item = next((d for d in drawings if d.get("id") == selected_id), None)
+
+    if selected_item:
+        b1, b2 = st.columns(2)
+        with b1:
+            st.download_button(
+                label=f"Download {selected_item.get('file_name', 'drawing_file')}",
+                data=base64.b64decode(selected_item.get("content_b64", "")),
+                file_name=selected_item.get("file_name", "drawing_file"),
+                mime=selected_item.get("mime_type", "application/octet-stream"),
+                width="stretch",
+                key=f"drawing_dl_{selected_item.get('id', '')}",
+            )
+        with b2:
+            if st.button("Delete Selected Drawing", width="stretch", key=f"drawing_del_{selected_item.get('id', '')}"):
+                drawing_id = selected_item.get("id", "")
+                data["technical_drawings"] = [d for d in drawings if d.get("id") != drawing_id]
+                for quote in data.get("quotations", []):
+                    quote["linked_drawing_ids"] = [x for x in normalize_linked_ids(quote.get("linked_drawing_ids", [])) if x != drawing_id]
+                log_activity(
+                    data,
+                    activity_type="Technical Drawing Deleted",
+                    entity_type="prospect",
+                    entity_id=selected_item.get("prospect_id", ""),
+                    company_name=selected_item.get("company_name", ""),
+                    details=f"Deleted drawing {drawing_id}",
+                )
+                save_data_and_refresh(data)
 
     with upload_tab:
         st.markdown("### Upload Quotation PDFs Against a Lead")
@@ -3956,7 +4151,17 @@ def main() -> None:
         st.title("Sales Workspace")
         section = st.radio(
             "Go to",
-            ["Dashboard", "Customers", "Prospects", "Pipeline", "Quotations", "Purchase Orders", "Insights", "Reports"],
+            [
+                "Dashboard",
+                "Customers",
+                "Prospects",
+                "Technical Drawings",
+                "Pipeline",
+                "Quotations",
+                "Purchase Orders",
+                "Insights",
+                "Reports",
+            ],
             label_visibility="collapsed",
         )
         st.markdown("---")
@@ -3969,6 +4174,8 @@ def main() -> None:
         customers_view(data)
     elif section == "Prospects":
         prospects_view(data)
+    elif section == "Technical Drawings":
+        technical_drawings_view(data)
     elif section == "Pipeline":
         pipeline_view(data)
     elif section == "Quotations":
