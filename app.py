@@ -2109,11 +2109,61 @@ def prospects_view(data: dict[str, list[dict[str, Any]]]) -> None:
             ordered_cols.append("created_date")
         p_df = p_df[ordered_cols]
 
+        st.markdown("### Saved Views")
+        quick_view = st.selectbox(
+            "Quick lead view",
+            [
+                "All Leads",
+                "My Hot Leads",
+                "Quotes Sent This Week",
+                "Won This Month",
+            ],
+            key="prospects_quick_view",
+        )
+        status_filter = st.multiselect("Filter by Status", STATUSES, default=[])
+        min_estimated = st.number_input("Minimum Estimated Value", min_value=0.0, step=1000.0, value=0.0)
+        only_without_quotes = st.toggle("Only leads without quotations", value=False)
+
+        filtered_df = p_df.copy()
+        today = date.today()
+        week_start = today - timedelta(days=7)
+        month_start = today.replace(day=1)
+
+        if quick_view == "My Hot Leads":
+            hot_statuses = {"Qualified", "Proposal Sent", "Negotiation"}
+            filtered_df = filtered_df[filtered_df["status"].isin(hot_statuses)]
+            if "next_action" in filtered_df.columns:
+                filtered_df = filtered_df[filtered_df["next_action"].astype(str).str.strip() != ""]
+        elif quick_view == "Quotes Sent This Week":
+            if "quote_generated" in filtered_df.columns:
+                filtered_df = filtered_df[filtered_df["quote_generated"] == "Yes"]
+            if "updated_at" in filtered_df.columns:
+                filtered_df = filtered_df[
+                    filtered_df["updated_at"].apply(
+                        lambda x: bool((parsed := safe_parse_date(str(x))) and parsed >= week_start)
+                    )
+                ]
+        elif quick_view == "Won This Month":
+            filtered_df = filtered_df[filtered_df["status"] == "Won"]
+            if "updated_at" in filtered_df.columns:
+                filtered_df = filtered_df[
+                    filtered_df["updated_at"].apply(
+                        lambda x: bool((parsed := safe_parse_date(str(x))) and parsed >= month_start)
+                    )
+                ]
+
+        if status_filter:
+            filtered_df = filtered_df[filtered_df["status"].isin(status_filter)]
+        if "estimated_value" in filtered_df.columns and min_estimated > 0:
+            filtered_df = filtered_df[pd.to_numeric(filtered_df["estimated_value"], errors="coerce").fillna(0.0) >= float(min_estimated)]
+        if only_without_quotes and "quote_generated" in filtered_df.columns:
+            filtered_df = filtered_df[filtered_df["quote_generated"] != "Yes"]
+
         render_dynamic_table(
-            p_df,
+            filtered_df,
             "Live Opportunity Register",
             key="prospects_register",
-            max_rows=max(1, len(p_df)),
+            max_rows=max(1, len(filtered_df)),
             strict_columns=True,
         )
     else:
@@ -2760,6 +2810,197 @@ def pipeline_view(data: dict[str, list[dict[str, Any]]]) -> None:
         for col, status in zip(row_cols, row_statuses):
             with col:
                 render_lane(status)
+
+
+def global_search_view(data: dict[str, Any]) -> None:
+    render_workspace_hero(
+        "Workspace",
+        "Global Search",
+        "Search across leads, customers, quotations, drawings, purchase orders, and activity in one place.",
+    )
+
+    query = st.text_input(
+        "Search everything",
+        placeholder="Try company name, LEAD ID, DRW ID, quote ID, PO number, or product...",
+    ).strip()
+    entity_options = ["Prospects", "Customers", "Quotations", "Technical Drawings", "Purchase Orders", "Activity"]
+    selected_entities = st.multiselect("Include entities", entity_options, default=entity_options)
+
+    if not query:
+        st.info("Enter a keyword to run global search.")
+        return
+
+    q = query.lower()
+    results: list[dict[str, str]] = []
+
+    def add_result(entity: str, item_id: str, company: str, summary: str, status: str, item_date: str, workspace: str) -> None:
+        results.append(
+            {
+                "entity": entity,
+                "record_id": item_id,
+                "company_name": company,
+                "summary": summary,
+                "status": status,
+                "date": item_date,
+                "open_in": workspace,
+            }
+        )
+
+    if "Prospects" in selected_entities:
+        for p in data.get("prospects", []):
+            blob = " | ".join(
+                [
+                    str(p.get("id", "")),
+                    str(p.get("company_name", "")),
+                    str(p.get("contact_name", "")),
+                    str(p.get("email", "")),
+                    str(p.get("phone", "")),
+                    str(p.get("status", "")),
+                    str(p.get("notes", "")),
+                ]
+            ).lower()
+            if q in blob:
+                add_result(
+                    "Prospect",
+                    str(p.get("id", "")),
+                    str(p.get("company_name", "")),
+                    str(p.get("next_action", "")) or "Lead matched",
+                    str(p.get("status", "")),
+                    str(p.get("updated_at", "")),
+                    "Prospects",
+                )
+
+    if "Customers" in selected_entities:
+        for c in data.get("customers", []):
+            blob = " | ".join(
+                [
+                    str(c.get("id", "")),
+                    str(c.get("company_name", "")),
+                    str(c.get("contact_name", "")),
+                    str(c.get("email", "")),
+                    str(c.get("phone", "")),
+                    str(c.get("industry", "")),
+                ]
+            ).lower()
+            if q in blob:
+                add_result(
+                    "Customer",
+                    str(c.get("id", "")),
+                    str(c.get("company_name", "")),
+                    str(c.get("contact_name", "")) or "Customer matched",
+                    str(c.get("lifecycle_stage", "")),
+                    str(c.get("last_contact", "")),
+                    "Customers",
+                )
+
+    if "Quotations" in selected_entities:
+        for quote in data.get("quotations", []):
+            blob = " | ".join(
+                [
+                    str(quote.get("id", "")),
+                    str(quote.get("customer_name", "")),
+                    str(quote.get("product_name", "")),
+                    str(quote.get("status", "")),
+                    str(quote.get("quote_value", "")),
+                ]
+            ).lower()
+            if q in blob:
+                add_result(
+                    "Quotation",
+                    str(quote.get("id", "")),
+                    str(quote.get("customer_name", "")),
+                    str(quote.get("product_name", "")) or "Quotation matched",
+                    str(quote.get("status", "")),
+                    str(quote.get("created_date", "")),
+                    "Quotations",
+                )
+
+    if "Technical Drawings" in selected_entities:
+        for drawing in data.get("technical_drawings", []):
+            blob = " | ".join(
+                [
+                    str(drawing.get("id", "")),
+                    str(drawing.get("company_name", "")),
+                    str(drawing.get("drawing_title", "")),
+                    str(drawing.get("file_name", "")),
+                    str(drawing.get("drawing_type", "")),
+                    ",".join(normalize_linked_ids(drawing.get("linked_quote_ids", []))),
+                ]
+            ).lower()
+            if q in blob:
+                add_result(
+                    "Technical Drawing",
+                    str(drawing.get("id", "")),
+                    str(drawing.get("company_name", "")),
+                    str(drawing.get("drawing_title", "")) or str(drawing.get("file_name", "")),
+                    str(drawing.get("drawing_type", "")),
+                    str(drawing.get("uploaded_at", "")),
+                    "Technical Drawings",
+                )
+
+    if "Purchase Orders" in selected_entities:
+        for po in data.get("purchase_orders", []):
+            blob = " | ".join(
+                [
+                    str(po.get("id", "")),
+                    str(po.get("po_number", "")),
+                    str(po.get("company_name", "")),
+                    str(po.get("status", "")),
+                    str(po.get("po_value", "")),
+                ]
+            ).lower()
+            if q in blob:
+                add_result(
+                    "Purchase Order",
+                    str(po.get("id", "")),
+                    str(po.get("company_name", "")),
+                    str(po.get("po_number", "")) or "PO matched",
+                    str(po.get("status", "")),
+                    str(po.get("po_date", "")),
+                    "Purchase Orders",
+                )
+
+    if "Activity" in selected_entities:
+        for activity in data.get("activity_log", []):
+            blob = " | ".join(
+                [
+                    str(activity.get("activity_type", "")),
+                    str(activity.get("company_name", "")),
+                    str(activity.get("details", "")),
+                    str(activity.get("status", "")),
+                    str(activity.get("entity_id", "")),
+                ]
+            ).lower()
+            if q in blob:
+                add_result(
+                    "Activity",
+                    str(activity.get("entity_id", "")),
+                    str(activity.get("company_name", "")),
+                    str(activity.get("details", "")) or str(activity.get("activity_type", "")),
+                    str(activity.get("status", "")),
+                    str(activity.get("activity_date", "")),
+                    str(activity.get("entity_type", "")).title() + " Workspace",
+                )
+
+    if not results:
+        st.warning("No matching records found.")
+        return
+
+    results_df = pd.DataFrame(results)
+    render_dynamic_table(
+        results_df,
+        f"Global Search Results ({len(results_df)})",
+        key="global_search_results",
+        max_rows=max(1, len(results_df)),
+        strict_columns=True,
+    )
+    st.download_button(
+        "Export Search Results CSV",
+        data=csv_bytes(results_df),
+        file_name=f"global_search_{today_iso()}.csv",
+        mime="text/csv",
+        width="stretch",
+    )
 
 
 def insights_view(data: dict[str, list[dict[str, Any]]]) -> None:
@@ -4069,6 +4310,7 @@ def main() -> None:
             "Go to",
             [
                 "Dashboard",
+                "Global Search",
                 "Customers",
                 "Prospects",
                 "Technical Drawings",
@@ -4086,6 +4328,8 @@ def main() -> None:
 
     if section == "Dashboard":
         dashboard(data)
+    elif section == "Global Search":
+        global_search_view(data)
     elif section == "Customers":
         customers_view(data)
     elif section == "Prospects":
