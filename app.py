@@ -45,6 +45,7 @@ SAMPLE_DATA = {
     "quotations": [],
     "technical_drawings": [],
     "purchase_orders": [],
+    "tasks": [],
     "prospect_attachments": {},
     "customer_attachments": {},
     "activity_log": [],
@@ -1091,6 +1092,9 @@ def ensure_schema(data: dict[str, Any]) -> bool:
         changed = True
     if "purchase_orders" not in data or not isinstance(data.get("purchase_orders"), list):
         data["purchase_orders"] = []
+        changed = True
+    if "tasks" not in data or not isinstance(data.get("tasks"), list):
+        data["tasks"] = []
         changed = True
     if "prospect_attachments" not in data or not isinstance(data.get("prospect_attachments"), dict):
         data["prospect_attachments"] = {}
@@ -3163,6 +3167,117 @@ def lead_360_view(data: dict[str, Any]) -> None:
             )
 
 
+def followups_view(data: dict[str, Any]) -> None:
+    render_workspace_hero(
+        "Workspace",
+        "Follow-ups",
+        "Track next actions with due dates, owners, and priorities so no lead goes cold.",
+    )
+
+    tasks = data.get("tasks", [])
+    prospects = data.get("prospects", [])
+
+    today = date.today()
+    overdue_count = sum(
+        1
+        for t in tasks
+        if str(t.get("status", "Open")) != "Done"
+        and (due := safe_parse_date(str(t.get("due_date", ""))))
+        and due < today
+    )
+    open_count = sum(1 for t in tasks if str(t.get("status", "Open")) != "Done")
+
+    m1, m2, m3 = st.columns(3)
+    m1.metric("Open Follow-ups", open_count)
+    m2.metric("Overdue", overdue_count)
+    m3.metric("Completed", sum(1 for t in tasks if str(t.get("status", "Open")) == "Done"))
+
+    if tasks:
+        t_df = pd.DataFrame(tasks)
+        if "due_date" in t_df.columns:
+            t_df["_due_sort"] = t_df["due_date"].apply(lambda x: safe_parse_date(str(x)) or date.max)
+            t_df = t_df.sort_values(["status", "_due_sort", "priority"], ascending=[True, True, True]).drop(columns=["_due_sort"])
+        render_dynamic_table(
+            t_df,
+            "Follow-up Register",
+            key="followup_register",
+            max_rows=max(1, len(t_df)),
+            strict_columns=True,
+        )
+    else:
+        st.info("No follow-ups yet. Add your first action below.")
+
+    with st.expander("Add Follow-up", expanded=False):
+        lead_options = {f"{p.get('id', '')} | {p.get('company_name', '')}": p for p in prospects}
+        with st.form("new_followup_form", clear_on_submit=True):
+            lead_label = st.selectbox("Related Lead (optional)", ["General"] + list(lead_options.keys()))
+            f1, f2, f3 = st.columns(3)
+            owner = f1.text_input("Owner", placeholder="Sales owner")
+            due_date = f2.date_input("Due Date", value=today)
+            priority = f3.selectbox("Priority", ["High", "Medium", "Low"], index=1)
+            title = st.text_input("Follow-up Title*", placeholder="Call procurement for technical clarifications")
+            notes = st.text_area("Notes")
+            status = st.selectbox("Status", ["Open", "In Progress", "Done"], index=0)
+            submitted = st.form_submit_button("Create Follow-up", width="stretch")
+
+            if submitted:
+                if not title.strip():
+                    st.error("Follow-up title is required.")
+                else:
+                    selected_lead = lead_options.get(lead_label)
+                    new_task = {
+                        "id": next_id("TASK", [t.get("id", "") for t in tasks]),
+                        "prospect_id": selected_lead.get("id", "") if selected_lead else "",
+                        "company_name": selected_lead.get("company_name", "") if selected_lead else "",
+                        "title": title.strip(),
+                        "owner": owner.strip(),
+                        "due_date": str(due_date),
+                        "priority": priority,
+                        "status": status,
+                        "notes": notes.strip(),
+                        "created_at": now_stamp(),
+                        "updated_at": now_stamp(),
+                    }
+                    tasks.append(new_task)
+                    log_activity(
+                        data,
+                        activity_type="Follow-up Created",
+                        entity_type="prospect" if selected_lead else "task",
+                        entity_id=new_task.get("prospect_id", "") if selected_lead else new_task["id"],
+                        company_name=new_task.get("company_name", ""),
+                        details=f"{new_task['title']} (due {new_task['due_date']})",
+                        status=new_task["status"],
+                    )
+                    save_data_and_refresh(data)
+
+    if tasks:
+        st.markdown("### Update Follow-up Status")
+        options = {f"{t.get('id', '')} | {t.get('title', '')}": t for t in tasks}
+        selected_key = st.selectbox("Select follow-up", list(options.keys()))
+        selected_task = options[selected_key]
+
+        c1, c2 = st.columns(2)
+        new_status = c1.selectbox("New Status", ["Open", "In Progress", "Done"], index=["Open", "In Progress", "Done"].index(str(selected_task.get("status", "Open")) if str(selected_task.get("status", "Open")) in ["Open", "In Progress", "Done"] else "Open"))
+        new_due = c2.date_input("New Due Date", value=safe_parse_date(str(selected_task.get("due_date", ""))) or today)
+        if st.button("Save Follow-up Update", width="stretch"):
+            for task in data.get("tasks", []):
+                if task.get("id", "") == selected_task.get("id", ""):
+                    task["status"] = new_status
+                    task["due_date"] = str(new_due)
+                    task["updated_at"] = now_stamp()
+                    log_activity(
+                        data,
+                        activity_type="Follow-up Updated",
+                        entity_type="prospect" if task.get("prospect_id", "") else "task",
+                        entity_id=task.get("prospect_id", "") or task.get("id", ""),
+                        company_name=task.get("company_name", ""),
+                        details=f"{task.get('title', '')} moved to {new_status}",
+                        status=new_status,
+                    )
+                    break
+            save_data_and_refresh(data)
+
+
 def insights_view(data: dict[str, list[dict[str, Any]]]) -> None:
     render_workspace_hero(
         "Workspace",
@@ -4472,6 +4587,7 @@ def main() -> None:
                 "Dashboard",
                 "Global Search",
                 "Lead 360",
+                "Follow-ups",
                 "Customers",
                 "Prospects",
                 "Technical Drawings",
@@ -4493,6 +4609,8 @@ def main() -> None:
         global_search_view(data)
     elif section == "Lead 360":
         lead_360_view(data)
+    elif section == "Follow-ups":
+        followups_view(data)
     elif section == "Customers":
         customers_view(data)
     elif section == "Prospects":
