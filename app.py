@@ -24,6 +24,7 @@ APP_RELEASE = "2026-07-31-r5"
 DOWNLOADS_DIR = Path.home() / "Downloads"
 COMPANY_LOGO_SOURCE = DOWNLOADS_DIR / "WhatsApp_Image_2026-07-08_at_15.51.12__1_-removebg-preview.png"
 COMPANY_LOGO_FALLBACK = DOWNLOADS_DIR / "WhatsApp Image 2026-07-08 at 15.51.12.jpeg"
+SESSION_DATA_CACHE_KEY = "crm_data_cache"
 
 DATA_FILE = Path(__file__).parent / "crm_data.json"
 SUPABASE_TABLE = "crm_state"
@@ -39,6 +40,56 @@ STATUSES = [
 ]
 QUOTE_STATUSES = ["Draft", "Sent", "Accepted", "Rejected"]
 CONNECTED_STATUSES = {"Contacted", "Qualified", "Proposal Sent", "Negotiation", "Won"}
+DEFAULT_APP_SETTINGS = {
+    "monthly_target": 500000.0,
+    "discount_threshold_pct": 12.0,
+    "value_threshold_aed": 250000.0,
+    "special_terms_threshold_words": 8,
+    "forecast_weights": {
+        "Contacted": 0.2,
+        "Qualified": 0.45,
+        "Proposal Sent": 0.65,
+        "Negotiation": 0.8,
+    },
+}
+COUNTRY_OPTIONS = [
+    "Kuwait",
+    "United Arab Emirates",
+    "Saudi Arabia",
+    "Qatar",
+    "Oman",
+    "Bahrain",
+    "India",
+    "Singapore",
+    "Malaysia",
+    "Indonesia",
+    "Thailand",
+    "Vietnam",
+    "Philippines",
+    "China",
+    "Japan",
+    "South Korea",
+    "Turkey",
+    "Egypt",
+    "South Africa",
+    "United Kingdom",
+    "Germany",
+    "France",
+    "Italy",
+    "Spain",
+    "Netherlands",
+    "Belgium",
+    "Sweden",
+    "Norway",
+    "Denmark",
+    "Poland",
+    "United States",
+    "Canada",
+    "Mexico",
+    "Brazil",
+    "Australia",
+    "New Zealand",
+]
 
 
 SAMPLE_DATA = {
@@ -173,6 +224,7 @@ def style_app() -> None:
                 padding-top: 1.2rem !important;
                 padding-bottom: 2.1rem !important;
                 max-width: 1320px;
+                animation: workspacePop 300ms cubic-bezier(0.22, 1, 0.36, 1);
             }
 
             h1, h2, h3 {
@@ -183,6 +235,17 @@ def style_app() -> None:
             @keyframes fadeUp {
                 from { opacity: 0; transform: translateY(10px); }
                 to { opacity: 1; transform: translateY(0); }
+            }
+
+            @keyframes workspacePop {
+                from { opacity: 0.0; transform: translateY(8px) scale(0.995); }
+                to { opacity: 1; transform: translateY(0) scale(1); }
+            }
+
+            @keyframes clickPulse {
+                0% { transform: scale(1); }
+                35% { transform: scale(0.985); }
+                100% { transform: scale(1); }
             }
 
             .hero {
@@ -640,10 +703,29 @@ def style_app() -> None:
                 font-weight: 700 !important;
                 letter-spacing: 0.01em !important;
                 box-shadow: 0 8px 16px rgba(15, 53, 76, 0.10) !important;
+                transition: transform 170ms ease, box-shadow 220ms ease, border-color 180ms ease, filter 180ms ease !important;
             }
 
             .stButton > button:hover {
                 border-color: rgba(15, 124, 166, 0.45) !important;
+                transform: translateY(-1px);
+                box-shadow: 0 12px 20px rgba(15, 53, 76, 0.14) !important;
+            }
+
+            .stButton > button:active,
+            .stDownloadButton > button:active,
+            .stFormSubmitButton > button:active {
+                animation: clickPulse 180ms ease-out;
+                filter: saturate(1.08);
+            }
+
+            .stDownloadButton > button,
+            .stFormSubmitButton > button {
+                transition: transform 170ms ease, box-shadow 220ms ease, border-color 180ms ease, filter 180ms ease !important;
+            }
+
+            .stDownloadButton > button:hover,
+            .stFormSubmitButton > button:hover {
                 transform: translateY(-1px);
             }
 
@@ -872,6 +954,50 @@ def style_app() -> None:
             .dynamic-row:hover {
                 border-color: rgba(15, 110, 150, 0.28);
                 box-shadow: 0 8px 18px rgba(12, 47, 67, 0.12);
+                transform: translateY(-1px);
+                transition: transform 160ms ease, box-shadow 220ms ease, border-color 180ms ease;
+            }
+
+            .workspace-hero,
+            .section-card,
+            .report-card,
+            .pipeline-card,
+            .dynamic-table,
+            .chart-shell,
+            .table-shell {
+                transition: transform 220ms ease, box-shadow 260ms ease, border-color 220ms ease;
+            }
+
+            .workspace-hero:hover,
+            .section-card:hover,
+            .report-card:hover,
+            .pipeline-card:hover,
+            .chart-shell:hover,
+            .table-shell:hover {
+                transform: translateY(-1px);
+            }
+
+            .crm-click-burst {
+                animation: clickPulse 180ms ease-out !important;
+            }
+
+            @media (prefers-reduced-motion: reduce) {
+                .block-container,
+                .workspace-hero,
+                .section-card,
+                .report-card,
+                .pipeline-card,
+                .dynamic-table,
+                .chart-shell,
+                .table-shell,
+                .stButton > button,
+                .stDownloadButton > button,
+                .stFormSubmitButton > button,
+                .dynamic-row,
+                .crm-click-burst {
+                    animation: none !important;
+                    transition: none !important;
+                }
             }
 
             @media (max-width: 900px) {
@@ -922,6 +1048,33 @@ def style_app() -> None:
         </style>
         """,
         unsafe_allow_html=True,
+    )
+
+
+def inject_interaction_motion() -> None:
+    components.html(
+        """
+        <script>
+            const doc = window.parent.document;
+            if (!doc || doc.body.dataset.crmMotionInit === "1") {
+                // Already initialized for this session.
+            } else {
+                doc.body.dataset.crmMotionInit = "1";
+                doc.addEventListener("click", (event) => {
+                    const target = event.target && event.target.closest(
+                        "button, [role='radio'], [role='checkbox'], [role='switch'], [data-baseweb='select']"
+                    );
+                    if (!target) return;
+                    target.classList.remove("crm-click-burst");
+                    // Restart animation reliably.
+                    void target.offsetWidth;
+                    target.classList.add("crm-click-burst");
+                    setTimeout(() => target.classList.remove("crm-click-burst"), 220);
+                }, { passive: true });
+            }
+        </script>
+        """,
+        height=0,
     )
 
 
@@ -1067,14 +1220,21 @@ def today_iso() -> str:
     return str(date.today())
 
 
-def load_data() -> dict[str, Any]:
+def load_data(force_refresh: bool = False) -> dict[str, Any]:
+    if not force_refresh:
+        cached = st.session_state.get(SESSION_DATA_CACHE_KEY)
+        if isinstance(cached, dict):
+            return cached
+
     cloud_data = _load_supabase_data()
     if cloud_data is not None:
+        st.session_state[SESSION_DATA_CACHE_KEY] = cloud_data
         return cloud_data
 
     local_data = _load_local_data()
     if _is_supabase_enabled():
         _save_supabase_data(local_data)
+    st.session_state[SESSION_DATA_CACHE_KEY] = local_data
     return local_data
 
 
@@ -1107,6 +1267,19 @@ def ensure_schema(data: dict[str, Any]) -> bool:
     if "activity_log" not in data or not isinstance(data.get("activity_log"), list):
         data["activity_log"] = []
         changed = True
+    if "app_settings" not in data or not isinstance(data.get("app_settings"), dict):
+        data["app_settings"] = deepcopy(DEFAULT_APP_SETTINGS)
+        changed = True
+
+    settings = data.get("app_settings", {})
+    for key, default_value in DEFAULT_APP_SETTINGS.items():
+        if key not in settings:
+            settings[key] = deepcopy(default_value)
+            changed = True
+    if not isinstance(settings.get("forecast_weights", {}), dict):
+        settings["forecast_weights"] = deepcopy(DEFAULT_APP_SETTINGS["forecast_weights"])
+        changed = True
+    data["app_settings"] = settings
 
     cleaned_customers = sanitize_customers(data["customers"])
     if len(cleaned_customers) != len(data["customers"]):
@@ -1117,6 +1290,10 @@ def ensure_schema(data: dict[str, Any]) -> bool:
         normalized_estimated = pd.to_numeric(pd.Series([prospect.get("estimated_value", 0)]), errors="coerce").fillna(0.0).iloc[0]
         if prospect.get("estimated_value") != float(normalized_estimated):
             prospect["estimated_value"] = float(normalized_estimated)
+            changed = True
+
+        if "designation" not in prospect:
+            prospect["designation"] = ""
             changed = True
 
         if "connected_at" not in prospect:
@@ -1130,6 +1307,27 @@ def ensure_schema(data: dict[str, Any]) -> bool:
         normalized_quote = pd.to_numeric(pd.Series([quote.get("quote_value", 0)]), errors="coerce").fillna(0.0).iloc[0]
         if quote.get("quote_value") != float(normalized_quote):
             quote["quote_value"] = float(normalized_quote)
+            changed = True
+        normalized_list_price = pd.to_numeric(pd.Series([quote.get("list_price", quote.get("quote_value", 0))]), errors="coerce").fillna(0.0).iloc[0]
+        if quote.get("list_price") != float(normalized_list_price):
+            quote["list_price"] = float(normalized_list_price)
+            changed = True
+        normalized_discount_pct = pd.to_numeric(pd.Series([quote.get("discount_percent", 0)]), errors="coerce").fillna(0.0).iloc[0]
+        if quote.get("discount_percent") != float(normalized_discount_pct):
+            quote["discount_percent"] = float(normalized_discount_pct)
+            changed = True
+        normalized_discount_amt = pd.to_numeric(pd.Series([quote.get("discount_amount", 0)]), errors="coerce").fillna(0.0).iloc[0]
+        if quote.get("discount_amount") != float(normalized_discount_amt):
+            quote["discount_amount"] = float(normalized_discount_amt)
+            changed = True
+        if "special_terms" not in quote:
+            quote["special_terms"] = ""
+            changed = True
+        if "approval_required" not in quote:
+            quote["approval_required"] = False
+            changed = True
+        if "approval_flags" not in quote or not isinstance(quote.get("approval_flags"), list):
+            quote["approval_flags"] = []
             changed = True
         links = quote.get("linked_drawing_ids", [])
         if isinstance(links, str):
@@ -1158,11 +1356,14 @@ def ensure_schema(data: dict[str, Any]) -> bool:
 
 def save_data(data: dict[str, Any]) -> None:
     if _save_supabase_data(data):
+        st.session_state[SESSION_DATA_CACHE_KEY] = data
         return
     _save_local_data(data)
+    st.session_state[SESSION_DATA_CACHE_KEY] = data
 
 
 def save_data_and_refresh(data: dict[str, Any]) -> None:
+    st.session_state[SESSION_DATA_CACHE_KEY] = data
     save_data(data)
     st.rerun()
 
@@ -2078,6 +2279,8 @@ def prospects_view(data: dict[str, list[dict[str, Any]]]) -> None:
 
         p_df = pd.DataFrame(rows)
         p_df = p_df.drop(columns=["customer_id"], errors="ignore")
+        if "designation" not in p_df.columns:
+            p_df["designation"] = ""
         if "created_at" in p_df.columns:
             p_df["created_date"] = p_df["created_at"].astype(str).str[:10]
             p_df = p_df.drop(columns=["created_at"], errors="ignore")
@@ -2087,6 +2290,7 @@ def prospects_view(data: dict[str, list[dict[str, Any]]]) -> None:
             "id",
             "company_name",
             "contact_name",
+            "designation",
             "phone",
             "email",
             "source",
@@ -2188,9 +2392,10 @@ def prospects_view(data: dict[str, list[dict[str, Any]]]) -> None:
                 p1, p2, p3 = st.columns(3)
                 company = p1.text_input("Company Name*", value=selected.get("company_name", ""))
                 contact = p2.text_input("Contact Name*", value=selected.get("contact_name", ""))
+                designation = p3.text_input("Designation", value=selected.get("designation", ""))
                 current_status = selected.get("status", "New Lead")
                 status_index = STATUSES.index(current_status) if current_status in STATUSES else 0
-                status = p3.selectbox("Status", STATUSES, index=status_index)
+                status = st.selectbox("Status", STATUSES, index=status_index)
 
                 q1, q2, q3 = st.columns(3)
                 email = q1.text_input("Email", value=selected.get("email", ""))
@@ -2222,6 +2427,7 @@ def prospects_view(data: dict[str, list[dict[str, Any]]]) -> None:
                             if prospect["id"] == selected["id"]:
                                 prospect["company_name"] = company
                                 prospect["contact_name"] = contact
+                                prospect["designation"] = designation
                                 prospect["status"] = status
                                 prospect["email"] = email
                                 prospect["phone"] = phone
@@ -2250,10 +2456,11 @@ def prospects_view(data: dict[str, list[dict[str, Any]]]) -> None:
 
     with st.expander("Add New Prospect", expanded=False):
         with st.form("new_prospect_form", clear_on_submit=True):
-            p1, p2, p3 = st.columns(3)
+            p1, p2 = st.columns(2)
             company = p1.text_input("Company Name*")
             contact = p2.text_input("Contact Name*")
-            status = p3.selectbox("Status", STATUSES)
+            designation = st.text_input("Designation (of Contact Name)")
+            status = st.selectbox("Status", STATUSES)
 
             q1, q2, q3 = st.columns(3)
             email = q1.text_input("Email")
@@ -2281,6 +2488,7 @@ def prospects_view(data: dict[str, list[dict[str, Any]]]) -> None:
                         "customer_id": "",
                         "company_name": company,
                         "contact_name": contact,
+                        "designation": designation,
                         "email": email,
                         "phone": phone,
                         "source": source,
@@ -2316,8 +2524,45 @@ def quotations_view(data: dict[str, list[dict[str, Any]]]) -> None:
     quotes = data["quotations"]
     prospects = data["prospects"]
     drawings = data.get("technical_drawings", [])
+    settings = data.setdefault("app_settings", deepcopy(DEFAULT_APP_SETTINGS))
+    discount_threshold_pct = float(settings.get("discount_threshold_pct", DEFAULT_APP_SETTINGS["discount_threshold_pct"]))
+    value_threshold_aed = float(settings.get("value_threshold_aed", DEFAULT_APP_SETTINGS["value_threshold_aed"]))
+    special_terms_threshold_words = int(settings.get("special_terms_threshold_words", DEFAULT_APP_SETTINGS["special_terms_threshold_words"]))
     lead_map = {p.get("id", ""): p for p in prospects}
     attachments = data.get("prospect_attachments", {})
+
+    with st.expander("Commercial Guardrails", expanded=False):
+        g1, g2, g3 = st.columns(3)
+        new_discount_threshold = g1.number_input(
+            "Discount Threshold (%)",
+            min_value=0.0,
+            max_value=100.0,
+            step=0.5,
+            value=float(discount_threshold_pct),
+            key="guardrail_discount_threshold",
+        )
+        new_value_threshold = g2.number_input(
+            "Deal Value Threshold (AED)",
+            min_value=0.0,
+            step=1000.0,
+            value=float(value_threshold_aed),
+            key="guardrail_value_threshold",
+        )
+        new_terms_threshold = g3.number_input(
+            "Special Terms Threshold (words)",
+            min_value=1,
+            max_value=200,
+            step=1,
+            value=int(special_terms_threshold_words),
+            key="guardrail_terms_threshold",
+        )
+
+        if st.button("Save Guardrails", width="stretch", key="save_guardrails_btn"):
+            settings["discount_threshold_pct"] = float(new_discount_threshold)
+            settings["value_threshold_aed"] = float(new_value_threshold)
+            settings["special_terms_threshold_words"] = int(new_terms_threshold)
+            data["app_settings"] = settings
+            save_data_and_refresh(data)
 
     total_quote_value = sum(float(q.get("quote_value", 0) or 0) for q in quotes)
     total_uploaded_files = sum(len(v) for v in attachments.values())
@@ -2369,8 +2614,12 @@ def quotations_view(data: dict[str, list[dict[str, Any]]]) -> None:
 
                 c1, c2, c3 = st.columns(3)
                 product = c1.text_input("Product Name*")
-                value = c2.number_input("Quotation Value", min_value=0.0, step=1000.0)
+                value = c2.number_input("Final Quotation Value", min_value=0.0, step=1000.0)
                 currency = c3.selectbox("Currency", ["AED", "USD", "EUR", "GBP"])
+
+                p1, p2 = st.columns(2)
+                list_price = p1.number_input("List Price Before Discount (optional)", min_value=0.0, step=1000.0)
+                manual_discount_pct = p2.number_input("Discount % (used if list price is 0)", min_value=0.0, max_value=100.0, step=0.5)
 
                 d1, d2 = st.columns(2)
                 quote_status = d1.selectbox("Quote Status", QUOTE_STATUSES)
@@ -2388,6 +2637,7 @@ def quotations_view(data: dict[str, list[dict[str, Any]]]) -> None:
                 selected_drawing_ids = [drawing_labels[label] for label in selected_drawing_labels]
 
                 notes = st.text_area("Commercial Notes")
+                special_terms = st.text_area("Special Terms / Exceptions", placeholder="Custom payment terms, LD waivers, delivery exceptions...")
                 submitted = st.form_submit_button("Create Quotation", width="stretch")
 
                 if submitted:
@@ -2396,17 +2646,42 @@ def quotations_view(data: dict[str, list[dict[str, Any]]]) -> None:
                     elif not product:
                         st.error("Product name is required.")
                     else:
+                        if list_price > 0:
+                            discount_amount = max(float(list_price) - float(value), 0.0)
+                            discount_percent = (discount_amount / float(list_price) * 100.0) if list_price > 0 else 0.0
+                        else:
+                            discount_percent = float(manual_discount_pct)
+                            discount_amount = float(value) * (discount_percent / 100.0)
+
+                        special_terms_word_count = len(re.findall(r"\b\w+\b", str(special_terms or "")))
+                        approval_flags: list[str] = []
+                        if discount_percent > discount_threshold_pct:
+                            approval_flags.append(f"Discount above threshold ({discount_percent:.1f}% > {discount_threshold_pct:.1f}%)")
+                        if float(value or 0) > value_threshold_aed:
+                            approval_flags.append(f"Deal value above threshold (AED {float(value or 0):,.0f} > AED {value_threshold_aed:,.0f})")
+                        if special_terms_word_count >= special_terms_threshold_words and str(special_terms).strip():
+                            approval_flags.append(
+                                f"Special terms exceed threshold ({special_terms_word_count} words >= {special_terms_threshold_words})"
+                            )
+                        approval_required = len(approval_flags) > 0
+
                         new_quote = {
                             "id": next_id("Q", [q["id"] for q in quotes]),
                             "prospect_id": selected_lead["id"],
                             "customer_name": selected_lead["company_name"],
                             "product_name": product,
                             "quote_value": value,
+                            "list_price": float(list_price or 0),
+                            "discount_percent": float(discount_percent),
+                            "discount_amount": float(discount_amount),
                             "currency": currency,
                             "status": quote_status,
                             "created_date": str(date.today()),
                             "valid_until": str(valid_until),
                             "notes": notes,
+                            "special_terms": special_terms,
+                            "approval_required": approval_required,
+                            "approval_flags": approval_flags,
                             "linked_drawing_ids": selected_drawing_ids,
                         }
                         data["quotations"].append(new_quote)
@@ -2436,6 +2711,19 @@ def quotations_view(data: dict[str, list[dict[str, Any]]]) -> None:
                             amount=float(value or 0),
                             status=quote_status,
                         )
+
+                        if approval_required:
+                            log_activity(
+                                data,
+                                activity_type="Commercial Approval Flag",
+                                entity_type="prospect",
+                                entity_id=selected_lead["id"],
+                                company_name=selected_lead["company_name"],
+                                details=" | ".join(approval_flags),
+                                amount=float(value or 0),
+                                status="Approval Required",
+                            )
+                            st.warning("Approval flags raised: " + " | ".join(approval_flags))
 
                         save_data_and_refresh(data)
 
@@ -2825,13 +3113,21 @@ def global_search_view(data: dict[str, Any]) -> None:
     )
 
     st.markdown("### AI Global Lead Generation")
-    st.caption("Discover new companies from the web by niche and country, optionally qualify with GPT, then add selected ones directly to Prospects.")
+    st.caption("Discover new companies from the web by niche and country, then qualify and import them into Prospects.")
 
     g1, g2, g3 = st.columns(3)
     niche = g1.text_input("Target Product / Niche", value="LV panel builders")
-    country = g2.text_input("Country", value="Kuwait")
+    default_country_index = COUNTRY_OPTIONS.index("Kuwait") if "Kuwait" in COUNTRY_OPTIONS else 0
+    selected_country = g2.selectbox("Country", COUNTRY_OPTIONS, index=default_country_index)
     max_results = int(g3.number_input("Max Leads", min_value=5, max_value=30, value=12, step=1))
+    custom_country = st.text_input("Other Country (optional)", placeholder="Type custom country if not listed")
+    country = custom_country.strip() or selected_country
     use_gpt = st.toggle("Use GPT qualification (requires OPENAI_API_KEY secret)", value=True)
+    include_decision_makers = st.toggle(
+        "Enrich key decision makers (GM, Production Manager, Design Head)",
+        value=True,
+        help="Uses public web signals and GPT inference. Verify names before outreach.",
+    )
 
     if st.button("Find Global Leads", width="stretch"):
         if not niche.strip() or not country.strip():
@@ -2841,6 +3137,9 @@ def global_search_view(data: dict[str, Any]) -> None:
                 candidates = _discover_web_leads(niche.strip(), country.strip(), max_results=max_results)
                 if use_gpt:
                     candidates = _enrich_leads_with_gpt(candidates, niche.strip(), country.strip())
+                if include_decision_makers:
+                    candidates = _enrich_decision_makers_with_gpt(candidates, niche.strip(), country.strip())
+                    candidates = _fill_decision_contacts_from_public_web(candidates, niche.strip(), country.strip())
                 for item in candidates:
                     item["select"] = True
                 st.session_state["ai_lead_candidates"] = candidates
@@ -2850,9 +3149,29 @@ def global_search_view(data: dict[str, Any]) -> None:
         candidate_df = pd.DataFrame(ai_candidates)
         preferred_cols = [
             c
-            for c in ["select", "company_name", "country", "website", "reason_fit", "contact_hint", "confidence", "source"]
+            for c in [
+                "select",
+                "company_name",
+                "country",
+                "website",
+                "decision_contact_name",
+                "decision_contact_role",
+                "decision_source_url",
+                "general_manager",
+                "production_manager",
+                "design_head",
+                "decision_source",
+                "reason_fit",
+                "contact_hint",
+                "confidence",
+                "source",
+            ]
             if c in candidate_df.columns
         ]
+
+        if include_decision_makers:
+            named_count = int(candidate_df["decision_contact_name"].astype(str).str.strip().ne("").sum()) if "decision_contact_name" in candidate_df.columns else 0
+            st.caption(f"Decision contacts found: {named_count}/{len(candidate_df)}")
         edited_df = st.data_editor(
             candidate_df[preferred_cols],
             width="stretch",
@@ -2880,15 +3199,25 @@ def global_search_view(data: dict[str, Any]) -> None:
                 website = str(row.get("website", "")).strip()
                 reason_fit = str(row.get("reason_fit", "")).strip()
                 contact_hint = str(row.get("contact_hint", "")).strip()
+                general_manager = str(row.get("general_manager", "")).strip()
+                production_manager = str(row.get("production_manager", "")).strip()
+                design_head = str(row.get("design_head", "")).strip()
+                decision_contact_name = str(row.get("decision_contact_name", "")).strip()
+                decision_contact_role = str(row.get("decision_contact_role", "")).strip()
+                decision_source_url = str(row.get("decision_source_url", "")).strip()
+                decision_source = str(row.get("decision_source", "")).strip()
                 source = str(row.get("source", "AI Lead Discovery")).strip()
                 new_id = next_id("LEAD", existing_ids)
                 existing_ids.append(new_id)
+
+                chosen_contact = decision_contact_name or general_manager or production_manager or design_head
 
                 new_prospect = {
                     "id": new_id,
                     "customer_id": "",
                     "company_name": company_name,
-                    "contact_name": "",
+                    "contact_name": chosen_contact,
+                    "designation": decision_contact_role,
                     "email": "",
                     "phone": "",
                     "source": source,
@@ -2898,7 +3227,12 @@ def global_search_view(data: dict[str, Any]) -> None:
                     "status": "New Lead",
                     "expected_close_date": str(date.today() + timedelta(days=45)),
                     "next_action": "Initial outreach and qualification",
-                    "notes": f"Website: {website} | Reason: {reason_fit} | Contact hint: {contact_hint}",
+                    "notes": (
+                        f"Website: {website} | Reason: {reason_fit} | Contact hint: {contact_hint} | "
+                        f"Decision Contact: {decision_contact_name} ({decision_contact_role}) | Source URL: {decision_source_url} | "
+                        f"GM: {general_manager} | Production Manager: {production_manager} | "
+                        f"Design Head: {design_head} | Decision source: {decision_source}"
+                    ),
                     "created_at": now_stamp(),
                     "updated_at": now_stamp(),
                     "connected_at": "",
@@ -2921,6 +3255,140 @@ def global_search_view(data: dict[str, Any]) -> None:
                 save_data_and_refresh(data)
             else:
                 st.warning(f"No new leads added. Skipped {skipped} duplicate/invalid rows.")
+
+    st.markdown("---")
+    st.markdown("### Advanced GPT Workspace")
+    st.caption("Use a ChatGPT-style prompt to research companies/leads and prepare qualified prospects with publicly available contact paths.")
+
+    advanced_prompt = st.text_area(
+        "Prompt",
+        placeholder="Example: Find LV panel builders in Kuwait and Qatar with likely procurement/public contact emails, rank by fit, and suggest outreach strategy.",
+        height=140,
+        key="advanced_lead_prompt",
+    )
+
+    p1, p2 = st.columns(2)
+    if p1.button("Run Advanced GPT", width="stretch"):
+        if not advanced_prompt.strip():
+            st.error("Please enter a prompt first.")
+        else:
+            with st.spinner("Running advanced GPT workspace..."):
+                seed_leads = st.session_state.get("ai_lead_candidates", [])
+                gpt_answer = _run_advanced_gpt_lead_chat(advanced_prompt.strip(), seed_leads)
+                st.session_state["advanced_gpt_answer"] = gpt_answer
+
+    if p2.button("Create Qualified Prospects from Prompt", width="stretch"):
+        if not advanced_prompt.strip():
+            st.error("Please enter a prompt first.")
+        else:
+            with st.spinner("Extracting structured qualified prospects..."):
+                seed_leads = st.session_state.get("ai_lead_candidates", [])
+                structured = _extract_prospects_from_prompt(advanced_prompt.strip(), seed_leads)
+                st.session_state["advanced_structured_prospects"] = structured
+                if not structured:
+                    st.warning("No structured prospects extracted. Try a more specific prompt.")
+
+    gpt_answer = st.session_state.get("advanced_gpt_answer", "")
+    if gpt_answer:
+        st.markdown("#### GPT Output")
+        st.markdown(gpt_answer)
+
+    structured_candidates = st.session_state.get("advanced_structured_prospects", [])
+    if structured_candidates:
+        st.markdown("#### Qualified Prospects (Editable)")
+        structured_df = pd.DataFrame(structured_candidates)
+        preferred_cols = [
+            c
+            for c in [
+                "select",
+                "company_name",
+                "contact_name",
+                "designation",
+                "public_email",
+                "phone",
+                "country",
+                "website",
+                "industry",
+                "product_interest",
+                "estimated_value",
+                "qualification_reason",
+                "next_action",
+                "confidence",
+                "source",
+            ]
+            if c in structured_df.columns
+        ]
+        editable_structured = st.data_editor(
+            structured_df[preferred_cols],
+            width="stretch",
+            hide_index=True,
+            num_rows="dynamic",
+            key="advanced_structured_editor",
+        )
+
+        if st.button("Add Qualified Prospects to Prospect Workspace", width="stretch"):
+            selected_rows = (
+                editable_structured[editable_structured.get("select", False) == True]
+                if "select" in editable_structured.columns
+                else editable_structured
+            )
+            existing_names = {str(p.get("company_name", "")).strip().lower() for p in data.get("prospects", [])}
+            existing_ids = [p.get("id", "") for p in data.get("prospects", [])]
+            added = 0
+            skipped = 0
+            for _, row in selected_rows.iterrows():
+                company_name = str(row.get("company_name", "")).strip()
+                if not company_name or company_name.lower() in existing_names:
+                    skipped += 1
+                    continue
+
+                estimated_value = _parse_money_value(str(row.get("estimated_value", "0"))) or 0.0
+                product_interest = str(row.get("product_interest", niche.strip())).strip() or niche.strip()
+                website = str(row.get("website", "")).strip()
+                reason_fit = str(row.get("qualification_reason", "")).strip()
+                confidence = str(row.get("confidence", "")).strip()
+                source = str(row.get("source", "GPT Advanced Lead Workspace")).strip()
+
+                new_id = next_id("LEAD", existing_ids)
+                existing_ids.append(new_id)
+                new_prospect = {
+                    "id": new_id,
+                    "customer_id": "",
+                    "company_name": company_name,
+                    "contact_name": str(row.get("contact_name", "")).strip(),
+                    "designation": str(row.get("designation", "")).strip(),
+                    "email": str(row.get("public_email", "")).strip(),
+                    "phone": str(row.get("phone", "")).strip(),
+                    "source": source,
+                    "industry": str(row.get("industry", "")).strip(),
+                    "product_interest": product_interest,
+                    "estimated_value": float(estimated_value),
+                    "status": "Qualified",
+                    "expected_close_date": str(date.today() + timedelta(days=45)),
+                    "next_action": str(row.get("next_action", "Initial outreach")).strip() or "Initial outreach",
+                    "notes": f"Country: {str(row.get('country', '')).strip()} | Website: {website} | Fit: {reason_fit} | Confidence: {confidence}",
+                    "created_at": now_stamp(),
+                    "updated_at": now_stamp(),
+                    "connected_at": "",
+                }
+                data["prospects"].append(new_prospect)
+                existing_names.add(company_name.lower())
+                added += 1
+
+                log_activity(
+                    data,
+                    activity_type="Prospect Added",
+                    entity_type="prospect",
+                    entity_id=new_id,
+                    company_name=company_name,
+                    details=f"GPT advanced workspace import | Prompt-driven qualification",
+                    status="Qualified",
+                )
+
+            if added > 0:
+                save_data_and_refresh(data)
+            else:
+                st.warning(f"No new prospects added. Skipped {skipped} duplicate/invalid rows.")
 
 
 def lead_360_view(data: dict[str, Any]) -> None:
@@ -3219,6 +3687,109 @@ def _discover_web_leads(niche: str, country: str, max_results: int = 15) -> list
     return results
 
 
+def _discover_public_people_hits(company_name: str, country: str, niche: str, max_results: int = 8) -> list[dict[str, str]]:
+    people_query = (
+        f'"{company_name}" ("General Manager" OR "Production Manager" OR "Design Head" OR '
+        f'"Head of Design" OR "Plant Manager" OR "Engineering Manager") {country} {niche} linkedin'
+    )
+    url = f"https://duckduckgo.com/html/?q={quote_plus(people_query)}"
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0 Safari/537.36"
+    }
+    req = Request(url, headers=headers)
+
+    try:
+        with urlopen(req, timeout=20) as resp:
+            page = resp.read().decode("utf-8", errors="ignore")
+    except Exception:
+        return []
+
+    links = re.findall(r'<a[^>]*class="result__a"[^>]*href="([^"]+)"[^>]*>(.*?)</a>', page, flags=re.IGNORECASE | re.DOTALL)
+    snippets = re.findall(r'<a[^>]*class="result__snippet"[^>]*>(.*?)</a>', page, flags=re.IGNORECASE | re.DOTALL)
+
+    rows: list[dict[str, str]] = []
+    for idx, (href, raw_title) in enumerate(links[:max_results]):
+        title = html.unescape(re.sub(r"<.*?>", "", raw_title)).strip()
+        snippet = ""
+        if idx < len(snippets):
+            snippet = html.unescape(re.sub(r"<.*?>", "", snippets[idx])).strip()
+        rows.append({"title": title, "snippet": snippet, "url": href.strip()})
+    return rows
+
+
+def _extract_name_role_from_text(text: str) -> tuple[str, str]:
+    raw = str(text or "").strip()
+    if not raw:
+        return "", ""
+
+    role_pattern = r"(General Manager|Production Manager|Design Head|Head of Design|Plant Manager|Engineering Manager)"
+    name_pattern = r"([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,3})"
+
+    patterns = [
+        rf"{name_pattern}\s*[-,|:]\s*{role_pattern}",
+        rf"{role_pattern}\s*[-,:|]\s*{name_pattern}",
+        rf"{name_pattern}\s*,\s*{role_pattern}",
+    ]
+    for p in patterns:
+        m = re.search(p, raw, flags=re.IGNORECASE)
+        if not m:
+            continue
+        groups = [g.strip() for g in m.groups() if g and str(g).strip()]
+        if len(groups) < 2:
+            continue
+        if "manager" in groups[0].lower() or "head" in groups[0].lower():
+            role, name = groups[0], groups[1]
+        else:
+            name, role = groups[0], groups[1]
+        return name, role
+
+    return "", ""
+
+
+def _fill_decision_contacts_from_public_web(raw_leads: list[dict[str, str]], niche: str, country: str) -> list[dict[str, str]]:
+    if not raw_leads:
+        return raw_leads
+
+    filled: list[dict[str, str]] = []
+    for lead in raw_leads:
+        row = dict(lead)
+        existing_name = str(row.get("decision_contact_name", "")).strip()
+        if existing_name:
+            filled.append(row)
+            continue
+
+        company = str(row.get("company_name", "")).strip()
+        if not company:
+            filled.append(row)
+            continue
+
+        hits = _discover_public_people_hits(company, country, niche, max_results=8)
+        chosen_name = ""
+        chosen_role = ""
+        chosen_url = ""
+
+        for hit in hits:
+            for text in [hit.get("title", ""), hit.get("snippet", "")]:
+                name, role = _extract_name_role_from_text(text)
+                if name and role:
+                    chosen_name = name
+                    chosen_role = role
+                    chosen_url = str(hit.get("url", "")).strip()
+                    break
+            if chosen_name:
+                break
+
+        row["decision_contact_name"] = chosen_name
+        row["decision_contact_role"] = chosen_role
+        row["decision_source_url"] = chosen_url
+        if chosen_name:
+            row["decision_source"] = row.get("decision_source", "Public Web / Directory") or "Public Web / Directory"
+
+        filled.append(row)
+
+    return filled
+
+
 def _enrich_leads_with_gpt(raw_leads: list[dict[str, str]], niche: str, country: str) -> list[dict[str, str]]:
     api_key = _get_secret_or_env("OPENAI_API_KEY")
     model = _get_secret_or_env("OPENAI_MODEL", "gpt-4o-mini") or "gpt-4o-mini"
@@ -3290,6 +3861,245 @@ def _enrich_leads_with_gpt(raw_leads: list[dict[str, str]], niche: str, country:
         return raw_leads
 
 
+def _extract_json_object_from_text(raw: str) -> dict[str, Any] | None:
+    text = str(raw or "").strip()
+    if not text:
+        return None
+    try:
+        parsed = json.loads(text)
+        if isinstance(parsed, dict):
+            return parsed
+    except Exception:
+        pass
+
+    start = text.find("{")
+    end = text.rfind("}")
+    if start == -1 or end == -1 or end <= start:
+        return None
+    try:
+        parsed = json.loads(text[start : end + 1])
+        if isinstance(parsed, dict):
+            return parsed
+    except Exception:
+        return None
+    return None
+
+
+def _openai_chat_completion(messages: list[dict[str, str]], *, model: str, api_key: str, json_mode: bool = False) -> dict[str, Any] | None:
+    payload: dict[str, Any] = {
+        "model": model,
+        "messages": messages,
+    }
+    if json_mode:
+        payload["response_format"] = {"type": "json_object"}
+
+    req = Request(
+        "https://api.openai.com/v1/chat/completions",
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+
+    try:
+        with urlopen(req, timeout=45) as resp:
+            return json.loads(resp.read().decode("utf-8", errors="ignore"))
+    except Exception:
+        return None
+
+
+def _enrich_decision_makers_with_gpt(raw_leads: list[dict[str, str]], niche: str, country: str) -> list[dict[str, str]]:
+    api_key = _get_secret_or_env("OPENAI_API_KEY")
+    model = _get_secret_or_env("OPENAI_MODEL", "gpt-4o-mini") or "gpt-4o-mini"
+    if not api_key or not raw_leads:
+        return raw_leads
+
+    compact_input = [
+        {
+            "company_name": str(x.get("company_name", "")).strip(),
+            "website": str(x.get("website", "")).strip(),
+            "country": str(x.get("country", country)).strip() or country,
+        }
+        for x in raw_leads[:20]
+    ]
+
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "You return strict JSON only with key 'leads'. "
+                "For each item include: company_name, general_manager, production_manager, design_head, decision_source, "
+                "decision_contact_name, decision_contact_role, decision_source_url, decision_confidence (0-100). "
+                "Use only likely publicly discoverable signals (company website, public directory, public professional profiles). "
+                "Prefer returning at least one decision_contact_name + role for each company when evidence exists. "
+                "Do not fabricate names."
+            ),
+        },
+        {
+            "role": "user",
+            "content": (
+                f"Target product niche: {niche}. Country: {country}. "
+                "Add key decision makers for these companies: "
+                + json.dumps(compact_input)
+            ),
+        },
+    ]
+
+    response = _openai_chat_completion(messages, model=model, api_key=api_key, json_mode=True)
+    if not response:
+        return raw_leads
+
+    content = str(response.get("choices", [{}])[0].get("message", {}).get("content", "{}")).strip()
+    parsed = _extract_json_object_from_text(content) or {}
+    leads_payload = parsed.get("leads", []) if isinstance(parsed, dict) else []
+    if not isinstance(leads_payload, list):
+        return raw_leads
+
+    by_company: dict[str, dict[str, str]] = {}
+    for item in leads_payload:
+        if not isinstance(item, dict):
+            continue
+        cname = str(item.get("company_name", "")).strip().lower()
+        if not cname:
+            continue
+        by_company[cname] = {
+            "general_manager": str(item.get("general_manager", "")).strip(),
+            "production_manager": str(item.get("production_manager", "")).strip(),
+            "design_head": str(item.get("design_head", "")).strip(),
+            "decision_source": str(item.get("decision_source", "")).strip(),
+            "decision_contact_name": str(item.get("decision_contact_name", "")).strip(),
+            "decision_contact_role": str(item.get("decision_contact_role", "")).strip(),
+            "decision_source_url": str(item.get("decision_source_url", "")).strip(),
+            "decision_confidence": str(item.get("decision_confidence", "")).strip(),
+        }
+
+    merged: list[dict[str, str]] = []
+    for lead in raw_leads:
+        row = dict(lead)
+        key = str(row.get("company_name", "")).strip().lower()
+        dm = by_company.get(key, {})
+        row["general_manager"] = dm.get("general_manager", "")
+        row["production_manager"] = dm.get("production_manager", "")
+        row["design_head"] = dm.get("design_head", "")
+        row["decision_source"] = dm.get("decision_source", "")
+        row["decision_contact_name"] = dm.get("decision_contact_name", "")
+        row["decision_contact_role"] = dm.get("decision_contact_role", "")
+        row["decision_source_url"] = dm.get("decision_source_url", "")
+        row["decision_confidence"] = dm.get("decision_confidence", "")
+
+        if not row.get("decision_contact_name", ""):
+            if row.get("general_manager", ""):
+                row["decision_contact_name"] = row.get("general_manager", "")
+                row["decision_contact_role"] = "General Manager"
+            elif row.get("production_manager", ""):
+                row["decision_contact_name"] = row.get("production_manager", "")
+                row["decision_contact_role"] = "Production Manager"
+            elif row.get("design_head", ""):
+                row["decision_contact_name"] = row.get("design_head", "")
+                row["decision_contact_role"] = "Design Head"
+        merged.append(row)
+    return merged
+
+
+def _run_advanced_gpt_lead_chat(prompt: str, seed_leads: list[dict[str, str]]) -> str:
+    api_key = _get_secret_or_env("OPENAI_API_KEY")
+    model = _get_secret_or_env("OPENAI_MODEL", "gpt-4o-mini") or "gpt-4o-mini"
+    if not api_key:
+        return "OPENAI_API_KEY is missing. Add it in Streamlit secrets to use advanced GPT mode."
+
+    seed_text = json.dumps(seed_leads[:20]) if seed_leads else "[]"
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "You are an advanced B2B lead generation copilot. "
+                "Help identify companies, lead fit, and publicly available contact paths. "
+                "When listing leads, include: company name, country, website, likely fit, and confidence. "
+                "Use concise business style with headings and bullet points."
+            ),
+        },
+        {
+            "role": "user",
+            "content": (
+                "User prompt: " + prompt + "\n"
+                "Web-seeded candidates (if any): " + seed_text + "\n"
+                "Return practical lead-gen output the sales team can act on immediately."
+            ),
+        },
+    ]
+    response = _openai_chat_completion(messages, model=model, api_key=api_key, json_mode=False)
+    if not response:
+        return "Could not get response from GPT at the moment. Please retry."
+    return str(response.get("choices", [{}])[0].get("message", {}).get("content", "No response generated.")).strip()
+
+
+def _extract_prospects_from_prompt(prompt: str, seed_leads: list[dict[str, str]]) -> list[dict[str, str]]:
+    api_key = _get_secret_or_env("OPENAI_API_KEY")
+    model = _get_secret_or_env("OPENAI_MODEL", "gpt-4o-mini") or "gpt-4o-mini"
+    if not api_key:
+        return []
+
+    seed_text = json.dumps(seed_leads[:25]) if seed_leads else "[]"
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "You return strict JSON only with key 'prospects'. "
+                "Each item must include: company_name, contact_name, designation, public_email, phone, country, website, "
+                "industry, product_interest, estimated_value, qualification_reason, next_action, confidence_score. "
+                "Only include relevant leads likely to buy switchgear/panel solutions."
+            ),
+        },
+        {
+            "role": "user",
+            "content": (
+                "Build qualified CRM-ready prospects from this request: " + prompt + "\n"
+                "Candidates: " + seed_text
+            ),
+        },
+    ]
+
+    response = _openai_chat_completion(messages, model=model, api_key=api_key, json_mode=True)
+    if not response:
+        return []
+
+    content = str(response.get("choices", [{}])[0].get("message", {}).get("content", "{}")).strip()
+    parsed = _extract_json_object_from_text(content) or {}
+    raw_items = parsed.get("prospects", []) if isinstance(parsed, dict) else []
+    prospects: list[dict[str, str]] = []
+    if not isinstance(raw_items, list):
+        return prospects
+
+    for item in raw_items:
+        if not isinstance(item, dict):
+            continue
+        company_name = str(item.get("company_name", "")).strip()
+        if not company_name:
+            continue
+        prospects.append(
+            {
+                "select": True,
+                "company_name": company_name,
+                "contact_name": str(item.get("contact_name", "")).strip(),
+                "designation": str(item.get("designation", "")).strip(),
+                "public_email": str(item.get("public_email", "")).strip(),
+                "phone": str(item.get("phone", "")).strip(),
+                "country": str(item.get("country", "")).strip(),
+                "website": str(item.get("website", "")).strip(),
+                "industry": str(item.get("industry", "")).strip(),
+                "product_interest": str(item.get("product_interest", "")).strip(),
+                "estimated_value": str(item.get("estimated_value", "0")).strip(),
+                "qualification_reason": str(item.get("qualification_reason", "")).strip(),
+                "next_action": str(item.get("next_action", "Initial outreach")).strip(),
+                "confidence": str(item.get("confidence_score", "")).strip(),
+                "source": "GPT Advanced Lead Workspace",
+            }
+        )
+    return prospects
+
+
 def insights_view(data: dict[str, list[dict[str, Any]]]) -> None:
     render_workspace_hero(
         "Workspace",
@@ -3298,6 +4108,7 @@ def insights_view(data: dict[str, list[dict[str, Any]]]) -> None:
     )
     prospects = pd.DataFrame(data["prospects"])
     quotes = pd.DataFrame(data["quotations"])
+    settings = data.setdefault("app_settings", deepcopy(DEFAULT_APP_SETTINGS))
 
     if not prospects.empty and "estimated_value" in prospects.columns:
         prospects["estimated_value"] = pd.to_numeric(prospects["estimated_value"], errors="coerce").fillna(0.0)
@@ -3324,6 +4135,132 @@ def insights_view(data: dict[str, list[dict[str, Any]]]) -> None:
     k2.metric("Quotation Value", f"AED {total_quoted:,.0f}")
     k3.metric("Average Quote", f"AED {avg_quote:,.0f}")
     k4.metric("Active Leads", active_leads)
+
+    st.markdown("#### Forecast and Commercial Control")
+    fc1, fc2, fc3 = st.columns(3)
+    today = date.today()
+    forecast_month = fc1.selectbox(
+        "Forecast Month",
+        list(range(1, 13)),
+        index=today.month - 1,
+        format_func=lambda m: calendar.month_name[m],
+        key="insights_forecast_month",
+    )
+    forecast_year = int(fc2.number_input("Forecast Year", min_value=2024, max_value=2035, value=today.year, step=1, key="insights_forecast_year"))
+    monthly_target_input = fc3.number_input(
+        "Monthly Target (AED)",
+        min_value=0.0,
+        step=10000.0,
+        value=float(settings.get("monthly_target", DEFAULT_APP_SETTINGS["monthly_target"])),
+        key="insights_monthly_target",
+    )
+    if st.button("Save Monthly Target", key="save_monthly_target_btn", width="stretch"):
+        settings["monthly_target"] = float(monthly_target_input)
+        data["app_settings"] = settings
+        save_data_and_refresh(data)
+
+    month_start = date(forecast_year, forecast_month, 1)
+    month_end = date(forecast_year, forecast_month, calendar.monthrange(forecast_year, forecast_month)[1])
+
+    prospect_rows = data.get("prospects", [])
+    quote_map = latest_quote_map(data.get("quotations", []))
+
+    won_deals = [
+        p
+        for p in prospect_rows
+        if p.get("status") == "Won" and date_in_range(str(p.get("updated_at", "")), month_start, month_end)
+    ]
+    won_value = 0.0
+    for deal in won_deals:
+        q = quote_map.get(str(deal.get("id", "")), {})
+        won_value += float(q.get("quote_value", deal.get("estimated_value", 0)) or 0)
+
+    forecast_weights = settings.get("forecast_weights", DEFAULT_APP_SETTINGS["forecast_weights"])
+    candidate_statuses = {"Contacted", "Qualified", "Proposal Sent", "Negotiation"}
+    forecast_candidates = [
+        p
+        for p in prospect_rows
+        if p.get("status") in candidate_statuses
+        and date_in_range(str(p.get("expected_close_date", "")), month_start, month_end)
+    ]
+    weighted_forecast_value = 0.0
+    for candidate in forecast_candidates:
+        status = str(candidate.get("status", ""))
+        weight = float(forecast_weights.get(status, 0.0) or 0.0)
+        base_value = float(candidate.get("estimated_value", 0) or 0)
+        weighted_forecast_value += base_value * weight
+
+    monthly_target = float(settings.get("monthly_target", 0) or 0)
+    achievement_pct = (won_value / monthly_target * 100.0) if monthly_target > 0 else 0.0
+    projected_total = won_value + weighted_forecast_value
+    projected_pct = (projected_total / monthly_target * 100.0) if monthly_target > 0 else 0.0
+    target_gap = max(monthly_target - won_value, 0.0)
+
+    fm1, fm2, fm3, fm4 = st.columns(4)
+    fm1.metric("Deals Won (Month)", f"{len(won_deals)}")
+    fm2.metric("Won Value", f"AED {won_value:,.0f}")
+    fm3.metric("Target Achievement", f"{achievement_pct:.1f}%")
+    fm4.metric("Projected Achievement", f"{projected_pct:.1f}%")
+
+    forecast_df = pd.DataFrame(
+        [
+            {"metric": "Monthly Target", "value": monthly_target},
+            {"metric": "Won Value", "value": won_value},
+            {"metric": "Projected Total", "value": projected_total},
+            {"metric": "Gap to Target", "value": target_gap},
+        ]
+    )
+    max_forecast = max(float(forecast_df["value"].max()) if not forecast_df.empty else 0.0, 1.0)
+    forecast_chart = (
+        alt.Chart(forecast_df)
+        .mark_bar(cornerRadiusTopLeft=8, cornerRadiusTopRight=8, size=38)
+        .encode(
+            x=alt.X("metric:N", title=None, axis=alt.Axis(labelAngle=0)),
+            y=alt.Y("value:Q", title="AED", scale=alt.Scale(domain=[0, max_forecast])),
+            color=alt.Color(
+                "metric:N",
+                legend=None,
+                scale=alt.Scale(
+                    domain=["Monthly Target", "Won Value", "Projected Total", "Gap to Target"],
+                    range=["#0ea5a4", "#16a34a", "#0b6acb", "#f97316"],
+                ),
+            ),
+            tooltip=[alt.Tooltip("metric:N", title="Metric"), alt.Tooltip("value:Q", title="Value", format=",.0f")],
+        )
+        .properties(height=240)
+    )
+    st.altair_chart(forecast_chart, use_container_width=True)
+
+    if not quotes.empty:
+        quote_month = quotes.copy()
+        quote_month = quote_month[quote_month["created_date"].apply(lambda x: date_in_range(str(x), month_start, month_end))]
+        quote_month["discount_percent"] = pd.to_numeric(quote_month.get("discount_percent", 0), errors="coerce").fillna(0.0)
+        quote_month["discount_amount"] = pd.to_numeric(quote_month.get("discount_amount", 0), errors="coerce").fillna(0.0)
+        quote_month["quote_value"] = pd.to_numeric(quote_month.get("quote_value", 0), errors="coerce").fillna(0.0)
+
+        discount_threshold = float(settings.get("discount_threshold_pct", DEFAULT_APP_SETTINGS["discount_threshold_pct"]))
+        value_threshold = float(settings.get("value_threshold_aed", DEFAULT_APP_SETTINGS["value_threshold_aed"]))
+        terms_threshold = int(settings.get("special_terms_threshold_words", DEFAULT_APP_SETTINGS["special_terms_threshold_words"]))
+
+        discount_total = float(quote_month["discount_amount"].sum()) if not quote_month.empty else 0.0
+        avg_discount_pct = float(quote_month["discount_percent"].mean()) if not quote_month.empty else 0.0
+        high_discount_count = int((quote_month["discount_percent"] > discount_threshold).sum()) if not quote_month.empty else 0
+        high_value_count = int((quote_month["quote_value"] > value_threshold).sum()) if not quote_month.empty else 0
+        special_terms_count = 0
+        if not quote_month.empty and "special_terms" in quote_month.columns:
+            special_terms_count = int(
+                quote_month["special_terms"].fillna("").astype(str).apply(lambda t: len(re.findall(r"\b\w+\b", t)) >= terms_threshold and bool(t.strip())).sum()
+            )
+
+        st.markdown("##### Discount and Threshold Summary")
+        dc1, dc2, dc3, dc4 = st.columns(4)
+        dc1.metric("Discount Given", f"AED {discount_total:,.0f}")
+        dc2.metric("Avg Discount", f"{avg_discount_pct:.1f}%")
+        dc3.metric("Value Threshold Flags", high_value_count)
+        dc4.metric("Special Terms Flags", special_terms_count)
+
+        if high_discount_count > 0:
+            st.warning(f"{high_discount_count} quotations exceeded discount threshold ({discount_threshold:.1f}%).")
 
     left, right = st.columns(2)
 
@@ -4351,14 +5288,10 @@ def reports_view(data: dict[str, Any]) -> None:
 
 def main() -> None:
     style_app()
+    inject_interaction_motion()
     data = load_data()
     if ensure_schema(data):
         save_data(data)
-
-    components.html(
-        "<script>setTimeout(() => window.location.reload(), 30000);</script>",
-        height=0,
-    )
 
     with st.sidebar:
         st.title("Sales Workspace")
@@ -4381,6 +5314,9 @@ def main() -> None:
             label_visibility="collapsed",
         )
         st.markdown("---")
+        if st.button("Refresh Live Data", width="stretch"):
+            load_data(force_refresh=True)
+            st.rerun()
         if st.button("Reset to Sample Data", width="stretch"):
             save_data_and_refresh(SAMPLE_DATA)
 
