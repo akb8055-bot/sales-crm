@@ -1344,6 +1344,11 @@ def ensure_schema(data: dict[str, Any]) -> bool:
             po["po_value"] = float(normalized_po)
             changed = True
 
+    for task in data.get("tasks", []):
+        if "due_time" not in task or not str(task.get("due_time", "")).strip():
+            task["due_time"] = "18:00"
+            changed = True
+
     for drawing in data["technical_drawings"]:
         if "uploaded_at" in drawing:
             drawing["uploaded_at"] = str(drawing.get("uploaded_at", ""))[:10]
@@ -1405,6 +1410,68 @@ def safe_parse_date(value: str) -> date | None:
 def date_in_range(value: str, start: date, end: date) -> bool:
     parsed = safe_parse_date(value)
     return bool(parsed and start <= parsed <= end)
+
+
+def _parse_time_value(value: str) -> datetime.time:
+    raw = str(value or "").strip()
+    for fmt in ("%H:%M", "%H:%M:%S"):
+        try:
+            return datetime.strptime(raw, fmt).time()
+        except ValueError:
+            continue
+    return datetime.strptime("18:00", "%H:%M").time()
+
+
+def _task_due_datetime(task: dict[str, Any]) -> datetime | None:
+    due_day = safe_parse_date(str(task.get("due_date", "")))
+    if due_day is None:
+        return None
+    due_time = _parse_time_value(str(task.get("due_time", "18:00")))
+    return datetime.combine(due_day, due_time)
+
+
+def show_followup_reminders(data: dict[str, Any]) -> None:
+    tasks = data.get("tasks", [])
+    if not tasks:
+        return
+
+    now_dt = datetime.now()
+    shown_keys = st.session_state.setdefault("shown_followup_reminders", set())
+    reminders: list[str] = []
+
+    for task in tasks:
+        if str(task.get("status", "Open")) == "Done":
+            continue
+        due_dt = _task_due_datetime(task)
+        if due_dt is None:
+            continue
+
+        seconds_left = (due_dt - now_dt).total_seconds()
+        if 0 <= seconds_left <= 3600:
+            task_id = str(task.get("id", ""))
+            due_key = f"{task_id}|{due_dt.isoformat()}"
+            if due_key in shown_keys:
+                continue
+
+            mins_left = max(1, int(seconds_left // 60))
+            title = str(task.get("title", "Follow-up")).strip() or "Follow-up"
+            company = str(task.get("company_name", "")).strip()
+            due_stamp = due_dt.strftime("%Y-%m-%d %H:%M")
+            msg = f"Follow-up reminder: {title}"
+            if company:
+                msg += f" | {company}"
+            msg += f" | due at {due_stamp} ({mins_left} min left)"
+
+            reminders.append(msg)
+            shown_keys.add(due_key)
+
+    if reminders:
+        for msg in reminders:
+            try:
+                st.toast(msg)
+            except Exception:
+                pass
+            st.warning(msg)
 
 
 def csv_bytes(df: pd.DataFrame) -> bytes:
@@ -2610,7 +2677,57 @@ def quotations_view(data: dict[str, list[dict[str, Any]]]) -> None:
                 lead_options = {f"{p['id']} | {p['company_name']} ({p['status']})": p for p in prospects}
                 selected_label = st.selectbox("Prospect", list(lead_options.keys()) if lead_options else ["No prospects available"])
                 selected_lead = lead_options.get(selected_label)
-                drawings_for_lead = [d for d in drawings if d.get("prospect_id") == selected_lead.get("id", "")] if selected_lead else []
+                drawings_for_lead: list[dict[str, Any]] = []
+                company_matched_drawings: list[dict[str, Any]] = []
+                if selected_lead:
+                    lead_id = str(selected_lead.get("id", "")).strip()
+                    lead_company = str(selected_lead.get("company_name", "")).strip().lower()
+                    drawings_for_lead = [
+                        d for d in drawings if str(d.get("prospect_id", "")).strip() == lead_id
+                    ]
+                    if lead_company:
+                        company_matched_drawings = [
+                            d
+                            for d in drawings
+                            if str(d.get("company_name", "")).strip().lower() == lead_company
+                        ]
+
+                show_all_drawings = st.toggle(
+                    "Show all drawings for linking",
+                    value=False,
+                    help="Enable this if your drawing is not visible in lead-specific list.",
+                )
+
+                source_drawings = drawings_for_lead
+                if show_all_drawings:
+                    source_drawings = drawings
+                else:
+                    # Combine lead-mapped + company-matched drawings so users can link all relevant files.
+                    by_id: dict[str, dict[str, Any]] = {}
+                    for item in drawings_for_lead + company_matched_drawings:
+                        did = str(item.get("id", "")).strip()
+                        if did:
+                            by_id[did] = item
+                    source_drawings = list(by_id.values())
+
+                source_drawings = sorted(
+                    source_drawings,
+                    key=lambda d: str(d.get("uploaded_at", "")),
+                    reverse=True,
+                )
+
+                if selected_lead and not show_all_drawings:
+                    st.caption(
+                        f"Lead-mapped: {len(drawings_for_lead)} | Company-matched: {len(company_matched_drawings)} | "
+                        f"Available for linking: {len(source_drawings)}"
+                    )
+                    if not drawings_for_lead and company_matched_drawings:
+                        st.info(
+                            "No drawings mapped by lead ID; showing company-matched drawings. "
+                            "You can also enable 'Show all drawings for linking'."
+                        )
+                elif selected_lead and not source_drawings:
+                    st.warning("No drawings found for this lead yet. Upload in Technical Drawings workspace first.")
 
                 c1, c2, c3 = st.columns(3)
                 product = c1.text_input("Product Name*")
@@ -2626,8 +2743,8 @@ def quotations_view(data: dict[str, list[dict[str, Any]]]) -> None:
                 valid_until = d2.date_input("Valid Until", value=date.today())
 
                 drawing_labels = {
-                    f"{d.get('id', '')} | {d.get('drawing_title', '') or d.get('file_name', '')} | {d.get('revision', 'r0')}": d.get("id", "")
-                    for d in drawings_for_lead
+                    f"{d.get('id', '')} | {d.get('drawing_title', '') or d.get('file_name', '')} | {d.get('revision', 'r0')} | {d.get('uploaded_at', '')}": d.get("id", "")
+                    for d in source_drawings
                 }
                 selected_drawing_labels = st.multiselect(
                     "Link Technical Drawing IDs",
@@ -3539,19 +3656,20 @@ def followups_view(data: dict[str, Any]) -> None:
     render_workspace_hero(
         "Workspace",
         "Follow-ups",
-        "Track next actions with due dates, owners, and priorities so no lead goes cold.",
+        "Track next actions with due dates and priorities so no lead goes cold.",
     )
 
     tasks = data.get("tasks", [])
     prospects = data.get("prospects", [])
 
     today = date.today()
+    now_dt = datetime.now()
     overdue_count = sum(
         1
         for t in tasks
         if str(t.get("status", "Open")) != "Done"
-        and (due := safe_parse_date(str(t.get("due_date", ""))))
-        and due < today
+        and (due_dt := _task_due_datetime(t))
+        and due_dt < now_dt
     )
     open_count = sum(1 for t in tasks if str(t.get("status", "Open")) != "Done")
 
@@ -3562,8 +3680,10 @@ def followups_view(data: dict[str, Any]) -> None:
 
     if tasks:
         t_df = pd.DataFrame(tasks)
+        if "owner" in t_df.columns:
+            t_df = t_df.drop(columns=["owner"], errors="ignore")
         if "due_date" in t_df.columns:
-            t_df["_due_sort"] = t_df["due_date"].apply(lambda x: safe_parse_date(str(x)) or date.max)
+            t_df["_due_sort"] = t_df.apply(lambda row: _task_due_datetime(row.to_dict()) or datetime.max, axis=1)
             t_df = t_df.sort_values(["status", "_due_sort", "priority"], ascending=[True, True, True]).drop(columns=["_due_sort"])
         render_dynamic_table(
             t_df,
@@ -3580,8 +3700,8 @@ def followups_view(data: dict[str, Any]) -> None:
         with st.form("new_followup_form", clear_on_submit=True):
             lead_label = st.selectbox("Related Lead (optional)", ["General"] + list(lead_options.keys()))
             f1, f2, f3 = st.columns(3)
-            owner = f1.text_input("Owner", placeholder="Sales owner")
-            due_date = f2.date_input("Due Date", value=today)
+            due_date = f1.date_input("Due Date", value=today)
+            due_time = f2.time_input("Due Time", value=datetime.strptime("18:00", "%H:%M").time())
             priority = f3.selectbox("Priority", ["High", "Medium", "Low"], index=1)
             title = st.text_input("Follow-up Title*", placeholder="Call procurement for technical clarifications")
             notes = st.text_area("Notes")
@@ -3598,8 +3718,8 @@ def followups_view(data: dict[str, Any]) -> None:
                         "prospect_id": selected_lead.get("id", "") if selected_lead else "",
                         "company_name": selected_lead.get("company_name", "") if selected_lead else "",
                         "title": title.strip(),
-                        "owner": owner.strip(),
                         "due_date": str(due_date),
+                        "due_time": due_time.strftime("%H:%M"),
                         "priority": priority,
                         "status": status,
                         "notes": notes.strip(),
@@ -3613,7 +3733,7 @@ def followups_view(data: dict[str, Any]) -> None:
                         entity_type="prospect" if selected_lead else "task",
                         entity_id=new_task.get("prospect_id", "") if selected_lead else new_task["id"],
                         company_name=new_task.get("company_name", ""),
-                        details=f"{new_task['title']} (due {new_task['due_date']})",
+                        details=f"{new_task['title']} (due {new_task['due_date']} {new_task['due_time']})",
                         status=new_task["status"],
                     )
                     save_data_and_refresh(data)
@@ -3624,14 +3744,16 @@ def followups_view(data: dict[str, Any]) -> None:
         selected_key = st.selectbox("Select follow-up", list(options.keys()))
         selected_task = options[selected_key]
 
-        c1, c2 = st.columns(2)
+        c1, c2, c3 = st.columns(3)
         new_status = c1.selectbox("New Status", ["Open", "In Progress", "Done"], index=["Open", "In Progress", "Done"].index(str(selected_task.get("status", "Open")) if str(selected_task.get("status", "Open")) in ["Open", "In Progress", "Done"] else "Open"))
         new_due = c2.date_input("New Due Date", value=safe_parse_date(str(selected_task.get("due_date", ""))) or today)
+        new_due_time = c3.time_input("New Due Time", value=_parse_time_value(str(selected_task.get("due_time", "18:00"))))
         if st.button("Save Follow-up Update", width="stretch"):
             for task in data.get("tasks", []):
                 if task.get("id", "") == selected_task.get("id", ""):
                     task["status"] = new_status
                     task["due_date"] = str(new_due)
+                    task["due_time"] = new_due_time.strftime("%H:%M")
                     task["updated_at"] = now_stamp()
                     log_activity(
                         data,
@@ -3639,7 +3761,7 @@ def followups_view(data: dict[str, Any]) -> None:
                         entity_type="prospect" if task.get("prospect_id", "") else "task",
                         entity_id=task.get("prospect_id", "") or task.get("id", ""),
                         company_name=task.get("company_name", ""),
-                        details=f"{task.get('title', '')} moved to {new_status}",
+                        details=f"{task.get('title', '')} moved to {new_status} (due {task.get('due_date', '')} {task.get('due_time', '')})",
                         status=new_status,
                     )
                     break
@@ -5292,6 +5414,7 @@ def main() -> None:
     data = load_data()
     if ensure_schema(data):
         save_data(data)
+    show_followup_reminders(data)
 
     with st.sidebar:
         st.title("Sales Workspace")
