@@ -3019,6 +3019,19 @@ def quotations_view(data: dict[str, list[dict[str, Any]]]) -> None:
 
                         save_data_and_refresh(data)
 
+        st.markdown("### Upload Quotation PDF")
+        st.caption("Attach quotation PDF files directly to a selected lead.")
+        render_attachment_manager(
+            data,
+            prospects,
+            key_prefix="quotations_upload",
+            id_field="id",
+            name_field="company_name",
+            attachments_key="prospect_attachments",
+            entity_type="prospect",
+            track_quote_value=True,
+        )
+
 
 def technical_drawings_view(data: dict[str, Any]) -> None:
     render_workspace_hero(
