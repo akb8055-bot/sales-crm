@@ -1737,6 +1737,22 @@ def log_activity(
     )
 
 
+IMPORTANT_ACTIVITY_TYPES = {
+    "Customer Added",
+    "Prospect Added",
+    "Prospect Updated",
+    "Proposal Shared",
+    "Commercial Approval Flag",
+    "Purchase Order Received",
+    "Follow-up Created",
+    "Follow-up Updated",
+}
+
+
+def important_activities(activities: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [item for item in activities if str(item.get("activity_type", "")) in IMPORTANT_ACTIVITY_TYPES]
+
+
 def render_attachment_manager(
     data: dict[str, Any],
     items: list[dict[str, Any]],
@@ -2044,7 +2060,7 @@ def dashboard(data: dict[str, list[dict[str, Any]]]) -> None:
     open_leads = sum(1 for p in prospects if p.get("status") not in {"Won", "Lost"})
     conversion = (sum(1 for p in prospects if p.get("status") == "Won") / len(prospects) * 100) if prospects else 0
     connected = sum(1 for p in prospects if p.get("status") in CONNECTED_STATUSES)
-    latest_activity = sorted(activities, key=lambda item: item.get("created_at", ""), reverse=True)[:3]
+    latest_activity = sorted(important_activities(activities), key=lambda item: item.get("created_at", ""), reverse=True)[:3]
     top_status_df = (
         pd.DataFrame(prospects)["status"].value_counts().reindex(STATUSES, fill_value=0)
         if prospects
@@ -2521,6 +2537,20 @@ def prospects_view(data: dict[str, list[dict[str, Any]]]) -> None:
         else:
             st.info("Select a prospect from the dropdown to open the edit form.")
 
+        st.markdown("### Delete Prospect")
+        delete_options = {f"{p['id']} | {p['company_name']}": p for p in prospects}
+        delete_label = st.selectbox("Select a prospect to delete", list(delete_options.keys()), key="prospect_delete_select")
+        delete_target = delete_options[delete_label]
+        if st.button("Delete Selected Prospect", width="stretch"):
+            prospect_id = delete_target.get("id", "")
+            data["prospects"] = [p for p in data["prospects"] if p.get("id") != prospect_id]
+            data["quotations"] = [q for q in data.get("quotations", []) if q.get("prospect_id") != prospect_id]
+            data["technical_drawings"] = [d for d in data.get("technical_drawings", []) if d.get("prospect_id") != prospect_id]
+            data["purchase_orders"] = [po for po in data.get("purchase_orders", []) if po.get("prospect_id") != prospect_id]
+            data["tasks"] = [t for t in data.get("tasks", []) if t.get("prospect_id") != prospect_id]
+            data.get("prospect_attachments", {}).pop(prospect_id, None)
+            save_data_and_refresh(data)
+
     with st.expander("Add New Prospect", expanded=False):
         with st.form("new_prospect_form", clear_on_submit=True):
             p1, p2 = st.columns(2)
@@ -2669,6 +2699,20 @@ def quotations_view(data: dict[str, list[dict[str, Any]]]) -> None:
                         row["linked_drawing_ids"] = normalize_linked_ids(row.get("linked_drawing_ids", []))
                     data["quotations"] = edited_records
                     save_data_and_refresh(data)
+
+            quote_options = {f"{q.get('id', '')} | {q.get('customer_name', '')} | {q.get('product_name', '')}": q for q in quotes}
+            selected_quote_label = st.selectbox("Select quotation to delete", list(quote_options.keys()), key="quotation_delete_select")
+            selected_quote = quote_options[selected_quote_label]
+            if st.button("Delete Selected Quotation", width="stretch"):
+                quote_id = selected_quote.get("id", "")
+                data["quotations"] = [q for q in data.get("quotations", []) if q.get("id") != quote_id]
+                for drawing in data.get("technical_drawings", []):
+                    drawing["linked_quote_ids"] = [x for x in normalize_linked_ids(drawing.get("linked_quote_ids", [])) if x != quote_id]
+                for file_list in data.get("prospect_attachments", {}).values():
+                    for fmeta in file_list:
+                        if str(fmeta.get("linked_quotation_id", "")) == quote_id:
+                            fmeta["linked_quotation_id"] = ""
+                save_data_and_refresh(data)
         else:
             st.info("No quotations created yet.")
 
@@ -3096,15 +3140,6 @@ def technical_drawings_view(data: dict[str, Any]) -> None:
                             "linked_quote_ids": [],
                         }
                     )
-                    log_activity(
-                        data,
-                        activity_type="Technical Drawing Uploaded",
-                        entity_type="prospect",
-                        entity_id=selected_prospect["id"],
-                        company_name=selected_prospect.get("company_name", ""),
-                        details=f"{drawing_id} uploaded ({file_obj.name})",
-                        status=drawing_type,
-                    )
                 save_data_and_refresh(data)
 
     if not drawings:
@@ -3139,6 +3174,22 @@ def technical_drawings_view(data: dict[str, Any]) -> None:
         strict_columns=True,
     )
 
+    with st.expander("Edit Technical Drawing Records", expanded=False):
+        editable_drawings = st.data_editor(d_df[show_cols], width="stretch", hide_index=True, num_rows="dynamic", key="technical_drawings_editor")
+        if st.button("Save Technical Drawing Edits", width="stretch"):
+            edited_rows = editable_drawings.fillna("").to_dict("records")
+            preserved = {d.get("id", ""): d for d in data.get("technical_drawings", [])}
+            rebuilt: list[dict[str, Any]] = []
+            for row in edited_rows:
+                drawing_id = row.get("id", "")
+                original = preserved.get(drawing_id, {})
+                merged = dict(original)
+                merged.update(row)
+                merged["linked_quote_ids"] = normalize_linked_ids(merged.get("linked_quote_ids", []))
+                rebuilt.append(merged)
+            data["technical_drawings"] = rebuilt
+            save_data_and_refresh(data)
+
     draw_options = {
         f"{d.get('id', '')} | {d.get('company_name', '')} | {d.get('file_name', '')}": d.get("id", "")
         for d in drawings
@@ -3164,14 +3215,6 @@ def technical_drawings_view(data: dict[str, Any]) -> None:
                 data["technical_drawings"] = [d for d in drawings if d.get("id") != drawing_id]
                 for quote in data.get("quotations", []):
                     quote["linked_drawing_ids"] = [x for x in normalize_linked_ids(quote.get("linked_drawing_ids", [])) if x != drawing_id]
-                log_activity(
-                    data,
-                    activity_type="Technical Drawing Deleted",
-                    entity_type="prospect",
-                    entity_id=selected_item.get("prospect_id", ""),
-                    company_name=selected_item.get("company_name", ""),
-                    details=f"Deleted drawing {drawing_id}",
-                )
                 save_data_and_refresh(data)
 
 def purchase_orders_view(data: dict[str, Any]) -> None:
@@ -3193,6 +3236,20 @@ def purchase_orders_view(data: dict[str, Any]) -> None:
             if c in po_df.columns
         ]
         render_dynamic_table(po_df[show_cols], "PO Register", key="po_register", max_rows=100)
+        with st.expander("Edit Purchase Order Records", expanded=False):
+            edited_pos = st.data_editor(po_df[show_cols], width="stretch", hide_index=True, num_rows="dynamic", key="po_editor")
+            if st.button("Save Purchase Order Edits", width="stretch"):
+                preserved = {po.get("id", ""): po for po in data.get("purchase_orders", [])}
+                rebuilt: list[dict[str, Any]] = []
+                for row in edited_pos.fillna("").to_dict("records"):
+                    po_id = row.get("id", "")
+                    original = preserved.get(po_id, {})
+                    merged = dict(original)
+                    merged.update(row)
+                    merged["po_value"] = float(pd.to_numeric(pd.Series([merged.get("po_value", 0)]), errors="coerce").fillna(0.0).iloc[0])
+                    rebuilt.append(merged)
+                data["purchase_orders"] = rebuilt
+                save_data_and_refresh(data)
     else:
         st.info("No purchase orders yet. Upload the first PO below.")
 
@@ -3269,16 +3326,6 @@ def purchase_orders_view(data: dict[str, Any]) -> None:
         if st.button("Delete Selected Purchase Order", width="stretch"):
             po_id = selected_po.get("id", "")
             data["purchase_orders"] = [po for po in purchase_orders if po.get("id") != po_id]
-            log_activity(
-                data,
-                activity_type="Purchase Order Deleted",
-                entity_type="prospect",
-                entity_id=selected_po.get("prospect_id", ""),
-                company_name=selected_po.get("company_name", ""),
-                details=f"Deleted PO {selected_po.get('po_number', '')}",
-                amount=float(selected_po.get("po_value", 0) or 0),
-                status=selected_po.get("status", ""),
-            )
             save_data_and_refresh(data)
 
 
@@ -3953,6 +4000,15 @@ def followups_view(data: dict[str, Any]) -> None:
                         status=new_status,
                     )
                     break
+            save_data_and_refresh(data)
+
+        st.markdown("### Delete Follow-up")
+        delete_task_options = {f"{t.get('id', '')} | {t.get('title', '')}": t for t in tasks}
+        delete_task_label = st.selectbox("Select follow-up to delete", list(delete_task_options.keys()), key="task_delete_select")
+        delete_task = delete_task_options[delete_task_label]
+        if st.button("Delete Selected Follow-up", width="stretch"):
+            task_id = delete_task.get("id", "")
+            data["tasks"] = [t for t in data.get("tasks", []) if t.get("id") != task_id]
             save_data_and_refresh(data)
 
 
@@ -4701,7 +4757,7 @@ def render_period_report(data: dict[str, Any], start: date, end: date, label: st
     connected = [p for p in prospects if date_in_range(p.get("connected_at", ""), start, end)]
     proposals = [q for q in quotations if date_in_range(q.get("created_date", ""), start, end)]
     prospect_updates = [p for p in prospects if date_in_range(p.get("updated_at", ""), start, end)]
-    activities_in_period = [a for a in activities if date_in_range(a.get("activity_date", ""), start, end)]
+    activities_in_period = [a for a in important_activities(activities) if date_in_range(a.get("activity_date", ""), start, end)]
     won_projects = [p for p in prospects if p.get("status") == "Won" and date_in_range(p.get("updated_at", ""), start, end)]
 
     connected_df = pd.DataFrame(connected)
@@ -5362,7 +5418,7 @@ def period_frames(data: dict[str, Any], start: date, end: date) -> tuple[pd.Data
 
     connected = [p for p in prospects if date_in_range(p.get("connected_at", ""), start, end)]
     proposals = [q for q in quotations if date_in_range(q.get("created_date", ""), start, end)]
-    activities_in_period = [a for a in activities if date_in_range(a.get("activity_date", ""), start, end)]
+    activities_in_period = [a for a in important_activities(activities) if date_in_range(a.get("activity_date", ""), start, end)]
     won_projects = [p for p in prospects if p.get("status") == "Won" and date_in_range(p.get("updated_at", ""), start, end)]
     connected_df = pd.DataFrame(connected)
     proposals_df = pd.DataFrame(proposals)
