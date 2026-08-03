@@ -2844,6 +2844,181 @@ def quotations_view(data: dict[str, list[dict[str, Any]]]) -> None:
 
                         save_data_and_refresh(data)
 
+    with upload_tab:
+        st.caption("Create and upload quotations by lead from this workspace.")
+        with st.expander("Upload by Lead: Generate New Quotation", expanded=True):
+            with st.form("new_quote_form_upload_tab", clear_on_submit=True):
+                lead_options = {f"{p['id']} | {p['company_name']} ({p['status']})": p for p in prospects}
+                selected_label = st.selectbox(
+                    "Prospect",
+                    list(lead_options.keys()) if lead_options else ["No prospects available"],
+                    key="uploadtab_prospect",
+                )
+                selected_lead = lead_options.get(selected_label)
+                drawings_for_lead: list[dict[str, Any]] = []
+                company_matched_drawings: list[dict[str, Any]] = []
+                if selected_lead:
+                    lead_id = str(selected_lead.get("id", "")).strip()
+                    lead_company = str(selected_lead.get("company_name", "")).strip().lower()
+                    drawings_for_lead = [
+                        d for d in drawings if str(d.get("prospect_id", "")).strip() == lead_id
+                    ]
+                    if lead_company:
+                        company_matched_drawings = [
+                            d
+                            for d in drawings
+                            if str(d.get("company_name", "")).strip().lower() == lead_company
+                        ]
+
+                show_all_drawings = st.toggle(
+                    "Show all drawings for linking",
+                    value=False,
+                    help="Enable this if your drawing is not visible in lead-specific list.",
+                    key="uploadtab_show_all_drawings",
+                )
+
+                if show_all_drawings:
+                    source_drawings = drawings
+                else:
+                    by_id: dict[str, dict[str, Any]] = {}
+                    for item in drawings_for_lead + company_matched_drawings:
+                        did = str(item.get("id", "")).strip()
+                        if did:
+                            by_id[did] = item
+                    source_drawings = list(by_id.values())
+
+                source_drawings = sorted(
+                    source_drawings,
+                    key=lambda d: str(d.get("uploaded_at", "")),
+                    reverse=True,
+                )
+
+                if selected_lead and not show_all_drawings:
+                    st.caption(
+                        f"Lead-mapped: {len(drawings_for_lead)} | Company-matched: {len(company_matched_drawings)} | "
+                        f"Available for linking: {len(source_drawings)}"
+                    )
+
+                c1, c2, c3 = st.columns(3)
+                product = c1.text_input("Product Name*", key="uploadtab_product")
+                value = c2.number_input("Final Quotation Value", min_value=0.0, step=1000.0, key="uploadtab_value")
+                currency = c3.selectbox("Currency", ["AED", "USD", "EUR", "GBP"], key="uploadtab_currency")
+
+                p1, p2 = st.columns(2)
+                list_price = p1.number_input("List Price Before Discount (optional)", min_value=0.0, step=1000.0, key="uploadtab_list_price")
+                manual_discount_pct = p2.number_input("Discount % (used if list price is 0)", min_value=0.0, max_value=100.0, step=0.5, key="uploadtab_discount_pct")
+
+                d1, d2 = st.columns(2)
+                quote_status = d1.selectbox("Quote Status", QUOTE_STATUSES, key="uploadtab_quote_status")
+                valid_until = d2.date_input("Valid Until", value=date.today(), key="uploadtab_valid_until")
+
+                drawing_labels = {
+                    f"{d.get('id', '')} | {d.get('drawing_title', '') or d.get('file_name', '')} | {d.get('revision', 'r0')} | {d.get('uploaded_at', '')}": d.get("id", "")
+                    for d in source_drawings
+                }
+                selected_drawing_labels = st.multiselect(
+                    "Link Technical Drawing IDs",
+                    list(drawing_labels.keys()),
+                    help="Attach one or more mapped technical drawings for this quotation.",
+                    key="uploadtab_drawing_ids",
+                )
+                selected_drawing_ids = [drawing_labels[label] for label in selected_drawing_labels]
+
+                notes = st.text_area("Commercial Notes", key="uploadtab_notes")
+                special_terms = st.text_area(
+                    "Special Terms / Exceptions",
+                    placeholder="Custom payment terms, LD waivers, delivery exceptions...",
+                    key="uploadtab_special_terms",
+                )
+                submitted = st.form_submit_button("Create Quotation", width="stretch")
+
+                if submitted:
+                    if not selected_lead:
+                        st.error("Please create a prospect first.")
+                    elif not product:
+                        st.error("Product name is required.")
+                    else:
+                        if list_price > 0:
+                            discount_amount = max(float(list_price) - float(value), 0.0)
+                            discount_percent = (discount_amount / float(list_price) * 100.0) if list_price > 0 else 0.0
+                        else:
+                            discount_percent = float(manual_discount_pct)
+                            discount_amount = float(value) * (discount_percent / 100.0)
+
+                        special_terms_word_count = len(re.findall(r"\b\w+\b", str(special_terms or "")))
+                        approval_flags: list[str] = []
+                        if discount_percent > discount_threshold_pct:
+                            approval_flags.append(f"Discount above threshold ({discount_percent:.1f}% > {discount_threshold_pct:.1f}%)")
+                        if float(value or 0) > value_threshold_aed:
+                            approval_flags.append(f"Deal value above threshold (AED {float(value or 0):,.0f} > AED {value_threshold_aed:,.0f})")
+                        if special_terms_word_count >= special_terms_threshold_words and str(special_terms).strip():
+                            approval_flags.append(
+                                f"Special terms exceed threshold ({special_terms_word_count} words >= {special_terms_threshold_words})"
+                            )
+                        approval_required = len(approval_flags) > 0
+
+                        new_quote = {
+                            "id": next_id("Q", [q["id"] for q in quotes]),
+                            "prospect_id": selected_lead["id"],
+                            "customer_name": selected_lead["company_name"],
+                            "product_name": product,
+                            "quote_value": value,
+                            "list_price": float(list_price or 0),
+                            "discount_percent": float(discount_percent),
+                            "discount_amount": float(discount_amount),
+                            "currency": currency,
+                            "status": quote_status,
+                            "created_date": str(date.today()),
+                            "valid_until": str(valid_until),
+                            "notes": notes,
+                            "special_terms": special_terms,
+                            "approval_required": approval_required,
+                            "approval_flags": approval_flags,
+                            "linked_drawing_ids": selected_drawing_ids,
+                        }
+                        data["quotations"].append(new_quote)
+
+                        for drawing in data.get("technical_drawings", []):
+                            if drawing.get("id") in selected_drawing_ids:
+                                linked_quote_ids = normalize_linked_ids(drawing.get("linked_quote_ids", []))
+                                if new_quote["id"] not in linked_quote_ids:
+                                    linked_quote_ids.append(new_quote["id"])
+                                drawing["linked_quote_ids"] = linked_quote_ids
+
+                        for p in data["prospects"]:
+                            if p["id"] == selected_lead["id"] and p["status"] in {"New Lead", "Contacted", "Qualified"}:
+                                p["status"] = "Proposal Sent"
+                                p["updated_at"] = now_stamp()
+                                if not p.get("connected_at"):
+                                    p["connected_at"] = today_iso()
+
+                        log_activity(
+                            data,
+                            activity_type="Proposal Shared",
+                            entity_type="prospect",
+                            entity_id=selected_lead["id"],
+                            company_name=selected_lead["company_name"],
+                            details=f"Quotation created for {product} | Drawings linked: {len(selected_drawing_ids)}",
+                            product_name=product,
+                            amount=float(value or 0),
+                            status=quote_status,
+                        )
+
+                        if approval_required:
+                            log_activity(
+                                data,
+                                activity_type="Commercial Approval Flag",
+                                entity_type="prospect",
+                                entity_id=selected_lead["id"],
+                                company_name=selected_lead["company_name"],
+                                details=" | ".join(approval_flags),
+                                amount=float(value or 0),
+                                status="Approval Required",
+                            )
+                            st.warning("Approval flags raised: " + " | ".join(approval_flags))
+
+                        save_data_and_refresh(data)
+
 
 def technical_drawings_view(data: dict[str, Any]) -> None:
     render_workspace_hero(
