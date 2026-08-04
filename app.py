@@ -1347,6 +1347,12 @@ def ensure_schema(data: dict[str, Any]) -> bool:
         if po.get("po_value") != float(normalized_po):
             po["po_value"] = float(normalized_po)
             changed = True
+        if "linked_quotation_id" not in po:
+            po["linked_quotation_id"] = ""
+            changed = True
+        if "customer_id" not in po:
+            po["customer_id"] = ""
+            changed = True
 
     for task in data.get("tasks", []):
         if "due_time" not in task or not str(task.get("due_time", "")).strip():
@@ -1389,27 +1395,89 @@ def next_id(prefix: str, existing_ids: list[str]) -> str:
     return f"{prefix}-{new_num:04d}"
 
 
+def quote_id_sort_key(quote_id: str) -> int:
+    text = str(quote_id or "")
+    match = re.search(r"(\d+)$", text)
+    return int(match.group(1)) if match else 0
+
+
+def quote_recency_sort_key(quote: dict[str, Any]) -> tuple[str, str, str, int]:
+    return (
+        str(quote.get("created_date", "") or ""),
+        str(quote.get("updated_at", "") or ""),
+        str(quote.get("created_at", "") or ""),
+        quote_id_sort_key(str(quote.get("id", ""))),
+    )
+
+
 def latest_quote_map(quotations: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
-    def _quote_id_sort_key(quote_id: str) -> int:
-        text = str(quote_id or "")
-        match = re.search(r"(\d+)$", text)
-        return int(match.group(1)) if match else 0
-
-    def _quote_recency_key(quote: dict[str, Any]) -> tuple[str, str, str, int]:
-        return (
-            str(quote.get("created_date", "") or ""),
-            str(quote.get("updated_at", "") or ""),
-            str(quote.get("created_at", "") or ""),
-            _quote_id_sort_key(str(quote.get("id", ""))),
-        )
-
     by_prospect: dict[str, dict[str, Any]] = {}
-    sorted_quotes = sorted(quotations, key=_quote_recency_key, reverse=True)
+    sorted_quotes = sorted(quotations, key=quote_recency_sort_key, reverse=True)
     for quote in sorted_quotes:
         prospect_id = quote.get("prospect_id", "")
         if prospect_id and prospect_id not in by_prospect:
             by_prospect[prospect_id] = quote
     return by_prospect
+
+
+def ensure_customer_for_prospect(data: dict[str, Any], prospect_id: str) -> tuple[str, bool]:
+    prospects = data.get("prospects", [])
+    customers = data.get("customers", [])
+    prospect = next((p for p in prospects if str(p.get("id", "")) == str(prospect_id)), None)
+    if prospect is None:
+        return "", False
+
+    customer_id = str(prospect.get("customer_id", "") or "")
+    company_name = str(prospect.get("company_name", "") or "").strip()
+    company_key = company_name.lower()
+    matched_customer: dict[str, Any] | None = None
+
+    if customer_id:
+        matched_customer = next((c for c in customers if str(c.get("id", "")) == customer_id), None)
+    if matched_customer is None and company_key:
+        matched_customer = next((c for c in customers if str(c.get("company_name", "")).strip().lower() == company_key), None)
+
+    created_new = False
+    if matched_customer is None:
+        customer_id = next_id("CUST", [str(c.get("id", "")) for c in customers])
+        matched_customer = {
+            "id": customer_id,
+            "company_name": company_name,
+            "contact_name": str(prospect.get("contact_name", "") or ""),
+            "email": str(prospect.get("email", "") or ""),
+            "phone": str(prospect.get("phone", "") or ""),
+            "industry": str(prospect.get("industry", "") or ""),
+            "city": "",
+            "country": "",
+            "account_owner": "Adithya",
+            "lifecycle_stage": "Active",
+            "annual_revenue": 0.0,
+            "last_contact": today_iso(),
+            "notes": "Auto-created from prospect after PO receipt.",
+        }
+        customers.append(matched_customer)
+        created_new = True
+    else:
+        customer_id = str(matched_customer.get("id", "") or customer_id)
+        if not str(matched_customer.get("company_name", "")).strip() and company_name:
+            matched_customer["company_name"] = company_name
+        if not str(matched_customer.get("contact_name", "")).strip():
+            matched_customer["contact_name"] = str(prospect.get("contact_name", "") or "")
+        if not str(matched_customer.get("email", "")).strip():
+            matched_customer["email"] = str(prospect.get("email", "") or "")
+        if not str(matched_customer.get("phone", "")).strip():
+            matched_customer["phone"] = str(prospect.get("phone", "") or "")
+        if not str(matched_customer.get("industry", "")).strip():
+            matched_customer["industry"] = str(prospect.get("industry", "") or "")
+        matched_customer["last_contact"] = today_iso()
+
+    prospect["customer_id"] = customer_id
+    prospect["status"] = "Won"
+    prospect["updated_at"] = now_stamp()
+    if not str(prospect.get("connected_at", "")).strip():
+        prospect["connected_at"] = today_iso()
+
+    return customer_id, created_new
 
 
 def safe_parse_date(value: str) -> date | None:
@@ -2098,16 +2166,7 @@ def dashboard(data: dict[str, list[dict[str, Any]]]) -> None:
         top_prospect = max(prospects, key=_prospect_effective_value)
     latest_quote = None
     if quotations:
-        latest_quote = sorted(
-            quotations,
-            key=lambda q: (
-                str(q.get("created_date", "") or ""),
-                str(q.get("updated_at", "") or ""),
-                str(q.get("created_at", "") or ""),
-                int(re.search(r"(\\d+)$", str(q.get("id", "") or "0")).group(1)) if re.search(r"(\\d+)$", str(q.get("id", "") or "")) else 0,
-            ),
-            reverse=True,
-        )[0]
+        latest_quote = sorted(quotations, key=quote_recency_sort_key, reverse=True)[0]
 
     st.markdown(
         """
@@ -2259,10 +2318,19 @@ def dashboard(data: dict[str, list[dict[str, Any]]]) -> None:
 
     st.markdown("### Recent Purchase Orders")
     if purchase_orders:
+        quote_lookup = {str(q.get("id", "")): q for q in quotations}
         po_df = pd.DataFrame(purchase_orders)
         if "po_value" in po_df.columns:
             po_df["po_value"] = pd.to_numeric(po_df["po_value"], errors="coerce").fillna(0.0)
-        show_cols = [c for c in ["id", "po_number", "company_name", "po_value", "currency", "po_date", "status"] if c in po_df.columns]
+        po_df["linked_quotation_id"] = po_df.get("linked_quotation_id", "").fillna("").astype(str)
+        po_df["linked_quote_value"] = po_df["linked_quotation_id"].apply(
+            lambda qid: float(quote_lookup.get(str(qid), {}).get("quote_value", 0) or 0) if str(qid).strip() else 0.0
+        )
+        show_cols = [
+            c
+            for c in ["id", "po_number", "company_name", "po_value", "currency", "po_date", "status", "linked_quotation_id", "linked_quote_value"]
+            if c in po_df.columns
+        ]
         if "po_date" in po_df.columns:
             po_df = po_df.sort_values("po_date", ascending=False)
         render_dynamic_table(po_df.head(8)[show_cols], "Recent Purchase Orders", key="dashboard_recent_pos", max_rows=8)
@@ -3269,15 +3337,34 @@ def purchase_orders_view(data: dict[str, Any]) -> None:
         "Capture confirmed business, reconcile PO status, and maintain auditable order documentation.",
     )
     prospects = data.get("prospects", [])
+    quotations = data.get("quotations", [])
     purchase_orders = data.get("purchase_orders", [])
 
     if purchase_orders:
+        quote_lookup = {str(q.get("id", "")): q for q in quotations}
         po_df = pd.DataFrame(purchase_orders)
         if "po_value" in po_df.columns:
             po_df["po_value"] = pd.to_numeric(po_df["po_value"], errors="coerce").fillna(0.0)
+        po_df["linked_quotation_id"] = po_df.get("linked_quotation_id", "").fillna("").astype(str)
+        po_df["linked_quote_value"] = po_df["linked_quotation_id"].apply(
+            lambda qid: float(quote_lookup.get(str(qid), {}).get("quote_value", 0) or 0) if str(qid).strip() else 0.0
+        )
         show_cols = [
             c
-            for c in ["id", "po_number", "prospect_id", "company_name", "po_value", "currency", "po_date", "status", "file_name"]
+            for c in [
+                "id",
+                "po_number",
+                "prospect_id",
+                "customer_id",
+                "company_name",
+                "po_value",
+                "currency",
+                "po_date",
+                "status",
+                "linked_quotation_id",
+                "linked_quote_value",
+                "file_name",
+            ]
             if c in po_df.columns
         ]
         render_dynamic_table(po_df[show_cols], "PO Register", key="po_register", max_rows=100)
@@ -3286,12 +3373,19 @@ def purchase_orders_view(data: dict[str, Any]) -> None:
             if st.button("Save Purchase Order Edits", width="stretch"):
                 preserved = {po.get("id", ""): po for po in data.get("purchase_orders", [])}
                 rebuilt: list[dict[str, Any]] = []
+                conversion_statuses = {"Received", "Approved", "Fulfilled"}
                 for row in edited_pos.fillna("").to_dict("records"):
                     po_id = row.get("id", "")
                     original = preserved.get(po_id, {})
                     merged = dict(original)
                     merged.update(row)
                     merged["po_value"] = float(pd.to_numeric(pd.Series([merged.get("po_value", 0)]), errors="coerce").fillna(0.0).iloc[0])
+                    merged["linked_quotation_id"] = str(merged.get("linked_quotation_id", "") or "").strip()
+                    merged["customer_id"] = str(merged.get("customer_id", "") or "").strip()
+                    if str(merged.get("status", "")) in conversion_statuses and str(merged.get("prospect_id", "")).strip():
+                        ensured_customer_id, _ = ensure_customer_for_prospect(data, str(merged.get("prospect_id", "")))
+                        if ensured_customer_id:
+                            merged["customer_id"] = ensured_customer_id
                     rebuilt.append(merged)
                 data["purchase_orders"] = rebuilt
                 save_data_and_refresh(data)
@@ -3306,6 +3400,21 @@ def purchase_orders_view(data: dict[str, Any]) -> None:
             with st.form("new_po_form", clear_on_submit=True):
                 selected_label = st.selectbox("Map to Prospect Lead", list(lead_options.keys()))
                 selected_lead = lead_options[selected_label]
+
+                lead_quotes = sorted(
+                    [q for q in quotations if str(q.get("prospect_id", "")).strip() == str(selected_lead.get("id", "")).strip()],
+                    key=quote_recency_sort_key,
+                    reverse=True,
+                )
+                quote_options = {
+                    f"{q.get('id', '')} | {q.get('product_name', '')} | {q.get('currency', 'AED')} {float(q.get('quote_value', 0) or 0):,.0f}": q
+                    for q in lead_quotes
+                }
+                selected_quote_label = st.selectbox(
+                    "Link to Quotation (optional)",
+                    ["No quotation link"] + list(quote_options.keys()),
+                )
+                selected_quote = quote_options.get(selected_quote_label)
 
                 p1, p2, p3 = st.columns(3)
                 po_number = p1.text_input("PO Number*")
@@ -3326,15 +3435,18 @@ def purchase_orders_view(data: dict[str, Any]) -> None:
                     elif uploaded_po is None:
                         st.error("Please upload a PO PDF file.")
                     else:
+                        customer_id, created_customer = ensure_customer_for_prospect(data, selected_lead["id"])
                         new_po = {
                             "id": next_id("PO", [po.get("id", "") for po in purchase_orders]),
                             "prospect_id": selected_lead["id"],
+                            "customer_id": customer_id,
                             "company_name": selected_lead["company_name"],
                             "po_number": po_number,
                             "po_value": float(po_value or 0),
                             "currency": currency,
                             "po_date": str(po_date),
                             "status": po_status,
+                            "linked_quotation_id": str(selected_quote.get("id", "") if selected_quote else ""),
                             "notes": notes,
                             "file_name": uploaded_po.name,
                             "mime_type": uploaded_po.type or "application/pdf",
@@ -3348,7 +3460,11 @@ def purchase_orders_view(data: dict[str, Any]) -> None:
                             entity_type="prospect",
                             entity_id=selected_lead["id"],
                             company_name=selected_lead["company_name"],
-                            details=f"PO {po_number} uploaded",
+                            details=(
+                                f"PO {po_number} uploaded"
+                                + (f" | Linked quotation: {selected_quote.get('id', '')}" if selected_quote else "")
+                                + (" | Prospect converted to customer" if created_customer else "")
+                            ),
                             amount=float(po_value or 0),
                             status=po_status,
                         )
