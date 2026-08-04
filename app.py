@@ -98,6 +98,7 @@ SAMPLE_DATA = {
     "quotations": [],
     "technical_drawings": [],
     "purchase_orders": [],
+    "order_acknowledgements": [],
     "tasks": [],
     "prospect_attachments": {},
     "customer_attachments": {},
@@ -1259,6 +1260,9 @@ def ensure_schema(data: dict[str, Any]) -> bool:
     if "purchase_orders" not in data or not isinstance(data.get("purchase_orders"), list):
         data["purchase_orders"] = []
         changed = True
+    if "order_acknowledgements" not in data or not isinstance(data.get("order_acknowledgements"), list):
+        data["order_acknowledgements"] = []
+        changed = True
     if "tasks" not in data or not isinstance(data.get("tasks"), list):
         data["tasks"] = []
         changed = True
@@ -1352,6 +1356,24 @@ def ensure_schema(data: dict[str, Any]) -> bool:
             changed = True
         if "customer_id" not in po:
             po["customer_id"] = ""
+            changed = True
+
+    for ack in data.get("order_acknowledgements", []):
+        normalized_ack = pd.to_numeric(pd.Series([ack.get("ack_value", 0)]), errors="coerce").fillna(0.0).iloc[0]
+        if ack.get("ack_value") != float(normalized_ack):
+            ack["ack_value"] = float(normalized_ack)
+            changed = True
+        if "prospect_id" not in ack:
+            ack["prospect_id"] = ""
+            changed = True
+        if "customer_id" not in ack:
+            ack["customer_id"] = ""
+            changed = True
+        if "linked_po_id" not in ack:
+            ack["linked_po_id"] = ""
+            changed = True
+        if "linked_quotation_id" not in ack:
+            ack["linked_quotation_id"] = ""
             changed = True
 
     for task in data.get("tasks", []):
@@ -1829,6 +1851,7 @@ IMPORTANT_ACTIVITY_TYPES = {
     "Proposal Shared",
     "Commercial Approval Flag",
     "Purchase Order Received",
+    "Order Acknowledgement Received",
     "Follow-up Created",
     "Follow-up Updated",
 }
@@ -2367,6 +2390,7 @@ def customers_view(data: dict[str, list[dict[str, Any]]]) -> None:
             company_name = selected_customer.get("company_name", "")
             data["customers"] = [c for c in data["customers"] if c.get("id") != customer_id]
             data.get("customer_attachments", {}).pop(customer_id, None)
+            data["order_acknowledgements"] = [a for a in data.get("order_acknowledgements", []) if a.get("customer_id") != customer_id]
             log_activity(
                 data,
                 activity_type="Customer Deleted",
@@ -2651,6 +2675,7 @@ def prospects_view(data: dict[str, list[dict[str, Any]]]) -> None:
             data["quotations"] = [q for q in data.get("quotations", []) if q.get("prospect_id") != prospect_id]
             data["technical_drawings"] = [d for d in data.get("technical_drawings", []) if d.get("prospect_id") != prospect_id]
             data["purchase_orders"] = [po for po in data.get("purchase_orders", []) if po.get("prospect_id") != prospect_id]
+            data["order_acknowledgements"] = [a for a in data.get("order_acknowledgements", []) if a.get("prospect_id") != prospect_id]
             data["tasks"] = [t for t in data.get("tasks", []) if t.get("prospect_id") != prospect_id]
             data.get("prospect_attachments", {}).pop(prospect_id, None)
             save_data_and_refresh(data)
@@ -3487,6 +3512,187 @@ def purchase_orders_view(data: dict[str, Any]) -> None:
         if st.button("Delete Selected Purchase Order", width="stretch"):
             po_id = selected_po.get("id", "")
             data["purchase_orders"] = [po for po in purchase_orders if po.get("id") != po_id]
+            save_data_and_refresh(data)
+
+
+def order_acknowledgements_view(data: dict[str, Any]) -> None:
+    render_workspace_hero(
+        "Workspace",
+        "Order Acknowledgement",
+        "Upload and track customer order acknowledgements against prospects, quotations, and purchase orders.",
+    )
+
+    prospects = data.get("prospects", [])
+    customers = sanitize_customers(data.get("customers", []))
+    quotations = data.get("quotations", [])
+    purchase_orders = data.get("purchase_orders", [])
+    acknowledgements = data.get("order_acknowledgements", [])
+
+    total_ack_value = sum(float(a.get("ack_value", 0) or 0) for a in acknowledgements)
+    m1, m2, m3 = st.columns(3)
+    m1.metric("Acknowledgements", len(acknowledgements))
+    m2.metric("Acknowledgement Value", f"AED {total_ack_value:,.0f}")
+    m3.metric("Mapped Customers", len({str(a.get('customer_id', '')).strip() for a in acknowledgements if str(a.get('customer_id', '')).strip()}))
+
+    if acknowledgements:
+        ack_df = pd.DataFrame(acknowledgements)
+        if "ack_value" in ack_df.columns:
+            ack_df["ack_value"] = pd.to_numeric(ack_df["ack_value"], errors="coerce").fillna(0.0)
+        show_cols = [
+            c
+            for c in [
+                "id",
+                "ack_number",
+                "company_name",
+                "prospect_id",
+                "customer_id",
+                "linked_po_id",
+                "linked_quotation_id",
+                "ack_value",
+                "currency",
+                "ack_date",
+                "status",
+                "file_name",
+            ]
+            if c in ack_df.columns
+        ]
+        render_dynamic_table(ack_df[show_cols], "Order Acknowledgement Register", key="ack_register", max_rows=120)
+
+        with st.expander("Edit Order Acknowledgement Records", expanded=False):
+            edited_ack = st.data_editor(ack_df[show_cols], width="stretch", hide_index=True, num_rows="dynamic", key="ack_editor")
+            if st.button("Save Order Acknowledgement Edits", width="stretch"):
+                preserved = {a.get("id", ""): a for a in acknowledgements}
+                rebuilt: list[dict[str, Any]] = []
+                for row in edited_ack.fillna("").to_dict("records"):
+                    ack_id = row.get("id", "")
+                    original = preserved.get(ack_id, {})
+                    merged = dict(original)
+                    merged.update(row)
+                    merged["ack_value"] = float(pd.to_numeric(pd.Series([merged.get("ack_value", 0)]), errors="coerce").fillna(0.0).iloc[0])
+                    merged["linked_po_id"] = str(merged.get("linked_po_id", "") or "").strip()
+                    merged["linked_quotation_id"] = str(merged.get("linked_quotation_id", "") or "").strip()
+                    merged["customer_id"] = str(merged.get("customer_id", "") or "").strip()
+                    rebuilt.append(merged)
+                data["order_acknowledgements"] = rebuilt
+                save_data_and_refresh(data)
+    else:
+        st.info("No order acknowledgements yet. Upload the first acknowledgement below.")
+
+    with st.expander("Upload Order Acknowledgement", expanded=True):
+        lead_options = {f"{p['id']} | {p['company_name']}": p for p in prospects}
+        if not lead_options:
+            st.warning("Create a prospect first so order acknowledgement can be mapped.")
+        else:
+            with st.form("new_ack_form", clear_on_submit=True):
+                selected_label = st.selectbox("Map to Prospect Lead", list(lead_options.keys()))
+                selected_lead = lead_options[selected_label]
+
+                lead_quotes = sorted(
+                    [q for q in quotations if str(q.get("prospect_id", "")).strip() == str(selected_lead.get("id", "")).strip()],
+                    key=quote_recency_sort_key,
+                    reverse=True,
+                )
+                lead_pos = sorted(
+                    [po for po in purchase_orders if str(po.get("prospect_id", "")).strip() == str(selected_lead.get("id", "")).strip()],
+                    key=lambda po: str(po.get("po_date", "")),
+                    reverse=True,
+                )
+
+                quote_options = {
+                    f"{q.get('id', '')} | {q.get('product_name', '')} | {q.get('currency', 'AED')} {float(q.get('quote_value', 0) or 0):,.0f}": q
+                    for q in lead_quotes
+                }
+                po_options = {
+                    f"{po.get('id', '')} | {po.get('po_number', '')} | {po.get('currency', 'AED')} {float(po.get('po_value', 0) or 0):,.0f}": po
+                    for po in lead_pos
+                }
+
+                selected_quote_label = st.selectbox("Link to Quotation (optional)", ["No quotation link"] + list(quote_options.keys()))
+                selected_quote = quote_options.get(selected_quote_label)
+                selected_po_label = st.selectbox("Link to Purchase Order (optional)", ["No PO link"] + list(po_options.keys()))
+                selected_po = po_options.get(selected_po_label)
+
+                a1, a2, a3 = st.columns(3)
+                ack_number = a1.text_input("Acknowledgement Number*")
+                ack_value = a2.number_input("Acknowledgement Value", min_value=0.0, step=1000.0)
+                currency = a3.selectbox("Currency", ["AED", "USD", "EUR", "GBP"])
+
+                b1, b2 = st.columns(2)
+                ack_date = b1.date_input("Acknowledgement Date", value=date.today())
+                ack_status = b2.selectbox("Status", ["Received", "Accepted", "In Production", "Completed", "Cancelled"])
+
+                notes = st.text_area("Acknowledgement Notes")
+                uploaded_ack = st.file_uploader("Upload Order Acknowledgement File", type=["pdf"], key="ack_file_upload")
+                submitted = st.form_submit_button("Save Order Acknowledgement", width="stretch")
+
+                if submitted:
+                    if not ack_number:
+                        st.error("Acknowledgement number is required.")
+                    elif uploaded_ack is None:
+                        st.error("Please upload acknowledgement PDF file.")
+                    else:
+                        customer_id, _ = ensure_customer_for_prospect(data, selected_lead["id"])
+                        customer_map = {str(c.get("id", "")): c for c in customers}
+                        customer_name = selected_lead.get("company_name", "")
+                        if customer_id and customer_map.get(customer_id):
+                            customer_name = customer_map[customer_id].get("company_name", customer_name)
+
+                        new_ack = {
+                            "id": next_id("ACK", [a.get("id", "") for a in acknowledgements]),
+                            "prospect_id": selected_lead["id"],
+                            "customer_id": customer_id,
+                            "company_name": customer_name,
+                            "ack_number": ack_number,
+                            "ack_value": float(ack_value or 0),
+                            "currency": currency,
+                            "ack_date": str(ack_date),
+                            "status": ack_status,
+                            "linked_po_id": str(selected_po.get("id", "") if selected_po else ""),
+                            "linked_quotation_id": str(selected_quote.get("id", "") if selected_quote else ""),
+                            "notes": notes,
+                            "file_name": uploaded_ack.name,
+                            "mime_type": uploaded_ack.type or "application/pdf",
+                            "content_b64": base64.b64encode(uploaded_ack.getvalue()).decode("ascii"),
+                            "uploaded_at": now_stamp(),
+                        }
+                        acknowledgements.append(new_ack)
+                        log_activity(
+                            data,
+                            activity_type="Order Acknowledgement Received",
+                            entity_type="prospect",
+                            entity_id=selected_lead["id"],
+                            company_name=selected_lead["company_name"],
+                            details=(
+                                f"Acknowledgement {ack_number} uploaded"
+                                + (f" | Linked PO: {selected_po.get('id', '')}" if selected_po else "")
+                                + (f" | Linked quotation: {selected_quote.get('id', '')}" if selected_quote else "")
+                            ),
+                            amount=float(ack_value or 0),
+                            status=ack_status,
+                        )
+                        save_data_and_refresh(data)
+
+    if acknowledgements:
+        st.markdown("### Acknowledgement Files")
+        ack_options = {
+            f"{a.get('id', '')} | {a.get('ack_number', '')} | {a.get('company_name', '')}": a
+            for a in acknowledgements
+        }
+        selected_ack_label = st.selectbox("Select Order Acknowledgement", list(ack_options.keys()))
+        selected_ack = ack_options[selected_ack_label]
+
+        if selected_ack.get("content_b64"):
+            st.download_button(
+                label=f"Download {selected_ack.get('file_name', 'order_acknowledgement.pdf')}",
+                data=base64.b64decode(selected_ack.get("content_b64", "")),
+                file_name=selected_ack.get("file_name", "order_acknowledgement.pdf"),
+                mime=selected_ack.get("mime_type", "application/pdf"),
+                width="stretch",
+            )
+
+        if st.button("Delete Selected Order Acknowledgement", width="stretch"):
+            ack_id = selected_ack.get("id", "")
+            data["order_acknowledgements"] = [a for a in acknowledgements if a.get("id") != ack_id]
             save_data_and_refresh(data)
 
 
@@ -5836,6 +6042,7 @@ def main() -> None:
                 "Pipeline",
                 "Quotations",
                 "Purchase Orders",
+                "Order Acknowledgement",
                 "Insights",
                 "Reports",
             ],
@@ -5868,6 +6075,8 @@ def main() -> None:
         quotations_view(data)
     elif section == "Purchase Orders":
         purchase_orders_view(data)
+    elif section == "Order Acknowledgement":
+        order_acknowledgements_view(data)
     elif section == "Insights":
         insights_view(data)
     elif section == "Reports":
