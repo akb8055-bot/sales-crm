@@ -2073,6 +2073,7 @@ def dashboard(data: dict[str, list[dict[str, Any]]]) -> None:
     purchase_orders = data.get("purchase_orders", [])
     activities = data.get("activity_log", [])
     quote_by_prospect = latest_quote_map(quotations)
+    total_quotation_value = sum(float(q.get("quote_value", 0) or 0) for q in quotations)
 
     def _prospect_effective_value(prospect: dict[str, Any]) -> float:
         quote = quote_by_prospect.get(str(prospect.get("id", "")), {})
@@ -2133,9 +2134,9 @@ def dashboard(data: dict[str, list[dict[str, Any]]]) -> None:
                 <div class='stat-footnote'>{connected} connected, {open_leads} open leads</div>
             </div>
             <div class='stat-card'>
-                <div class='stat-label'>Open Pipeline</div>
-                <div class='stat-value'>AED {total_pipeline:,.0f}</div>
-                <div class='stat-footnote'>Estimated value still in motion</div>
+                <div class='stat-label'>Total Quotation Value</div>
+                <div class='stat-value'>AED {total_quotation_value:,.0f}</div>
+                <div class='stat-footnote'>Live total from Quotations register</div>
             </div>
             <div class='stat-card'>
                 <div class='stat-label'>Won Value</div>
