@@ -1082,6 +1082,10 @@ def now_stamp() -> str:
     return datetime.now().strftime("%Y-%m-%d")
 
 
+def now_stamp_precise() -> str:
+    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+
 def render_workspace_hero(eyebrow: str, title: str, subtitle: str) -> None:
     st.markdown(
         f"""
@@ -1386,8 +1390,21 @@ def next_id(prefix: str, existing_ids: list[str]) -> str:
 
 
 def latest_quote_map(quotations: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    def _quote_id_sort_key(quote_id: str) -> int:
+        text = str(quote_id or "")
+        match = re.search(r"(\d+)$", text)
+        return int(match.group(1)) if match else 0
+
+    def _quote_recency_key(quote: dict[str, Any]) -> tuple[str, str, str, int]:
+        return (
+            str(quote.get("created_date", "") or ""),
+            str(quote.get("updated_at", "") or ""),
+            str(quote.get("created_at", "") or ""),
+            _quote_id_sort_key(str(quote.get("id", ""))),
+        )
+
     by_prospect: dict[str, dict[str, Any]] = {}
-    sorted_quotes = sorted(quotations, key=lambda q: q.get("created_date", ""), reverse=True)
+    sorted_quotes = sorted(quotations, key=_quote_recency_key, reverse=True)
     for quote in sorted_quotes:
         prospect_id = quote.get("prospect_id", "")
         if prospect_id and prospect_id not in by_prospect:
@@ -1975,6 +1992,8 @@ def render_attachment_manager(
                     "currency": quote_currency,
                     "status": quote_status,
                     "created_date": today_iso(),
+                    "created_at": now_stamp_precise(),
+                    "updated_at": now_stamp_precise(),
                     "valid_until": str(quote_valid_until),
                     "notes": quote_notes,
                     "extraction_source": st.session_state.get(extract_preview_key, {}).get("source", ""),
@@ -2053,9 +2072,16 @@ def dashboard(data: dict[str, list[dict[str, Any]]]) -> None:
     quotations = data["quotations"]
     purchase_orders = data.get("purchase_orders", [])
     activities = data.get("activity_log", [])
+    quote_by_prospect = latest_quote_map(quotations)
 
-    total_pipeline = sum(float(p.get("estimated_value", 0) or 0) for p in prospects if p.get("status") != "Lost")
-    won_value = sum(float(p.get("estimated_value", 0) or 0) for p in prospects if p.get("status") == "Won")
+    def _prospect_effective_value(prospect: dict[str, Any]) -> float:
+        quote = quote_by_prospect.get(str(prospect.get("id", "")), {})
+        if quote:
+            return float(quote.get("quote_value", 0) or 0)
+        return float(prospect.get("estimated_value", 0) or 0)
+
+    total_pipeline = sum(_prospect_effective_value(p) for p in prospects if p.get("status") != "Lost")
+    won_value = sum(_prospect_effective_value(p) for p in prospects if p.get("status") == "Won")
     po_total = sum(float(po.get("po_value", 0) or 0) for po in purchase_orders)
     open_leads = sum(1 for p in prospects if p.get("status") not in {"Won", "Lost"})
     conversion = (sum(1 for p in prospects if p.get("status") == "Won") / len(prospects) * 100) if prospects else 0
@@ -2068,10 +2094,19 @@ def dashboard(data: dict[str, list[dict[str, Any]]]) -> None:
     )
     top_prospect = None
     if prospects:
-        top_prospect = max(prospects, key=lambda p: float(p.get("estimated_value", 0) or 0))
+        top_prospect = max(prospects, key=_prospect_effective_value)
     latest_quote = None
     if quotations:
-        latest_quote = sorted(quotations, key=lambda q: q.get("created_date", ""), reverse=True)[0]
+        latest_quote = sorted(
+            quotations,
+            key=lambda q: (
+                str(q.get("created_date", "") or ""),
+                str(q.get("updated_at", "") or ""),
+                str(q.get("created_at", "") or ""),
+                int(re.search(r"(\\d+)$", str(q.get("id", "") or "0")).group(1)) if re.search(r"(\\d+)$", str(q.get("id", "") or "")) else 0,
+            ),
+            reverse=True,
+        )[0]
 
     st.markdown(
         """
@@ -2140,7 +2175,7 @@ def dashboard(data: dict[str, list[dict[str, Any]]]) -> None:
         if top_prospect:
             company_name = html.escape(str(top_prospect.get("company_name", "")).strip())
             st.markdown(f"<div><strong>{company_name}</strong></div>", unsafe_allow_html=True)
-            st.caption(f"{top_prospect.get('product_interest', 'No product')} | AED {float(top_prospect.get('estimated_value', 0) or 0):,.0f}")
+            st.caption(f"{top_prospect.get('product_interest', 'No product')} | AED {_prospect_effective_value(top_prospect):,.0f}")
             st.caption(f"Stage: {top_prospect.get('status', 'Unknown')} | Next action: {top_prospect.get('next_action', 'Not set') or 'Not set'}")
         else:
             st.markdown("<div class='empty-state'>Add a prospect to surface the highest-value opportunity here.</div>", unsafe_allow_html=True)
@@ -2693,9 +2728,14 @@ def quotations_view(data: dict[str, list[dict[str, Any]]]) -> None:
                     if "quote_value" in edited_quotes.columns:
                         edited_quotes["quote_value"] = pd.to_numeric(edited_quotes["quote_value"], errors="coerce").fillna(0.0)
                     edited_records = edited_quotes.fillna("").to_dict("records")
-                    existing_customer_ids = {q.get("id", ""): q.get("customer_id", "") for q in data["quotations"]}
+                    previous_quotes = {q.get("id", ""): q for q in data["quotations"]}
+                    edit_stamp = now_stamp_precise()
                     for row in edited_records:
-                        row["customer_id"] = existing_customer_ids.get(row.get("id", ""), "")
+                        existing_row = previous_quotes.get(row.get("id", ""), {})
+                        row["customer_id"] = existing_row.get("customer_id", "")
+                        row["created_at"] = str(existing_row.get("created_at", "") or "")
+                        row["updated_at"] = edit_stamp
+                        row["created_date"] = str(row.get("created_date", "") or today_iso())
                         row["linked_drawing_ids"] = normalize_linked_ids(row.get("linked_drawing_ids", []))
                     data["quotations"] = edited_records
                     save_data_and_refresh(data)
@@ -2838,6 +2878,8 @@ def quotations_view(data: dict[str, list[dict[str, Any]]]) -> None:
                             "currency": currency,
                             "status": quote_status,
                             "created_date": str(date.today()),
+                            "created_at": now_stamp_precise(),
+                            "updated_at": now_stamp_precise(),
                             "valid_until": str(valid_until),
                             "notes": notes,
                             "special_terms": special_terms,
@@ -3013,6 +3055,8 @@ def quotations_view(data: dict[str, list[dict[str, Any]]]) -> None:
                             "currency": currency,
                             "status": quote_status,
                             "created_date": str(date.today()),
+                            "created_at": now_stamp_precise(),
+                            "updated_at": now_stamp_precise(),
                             "valid_until": str(valid_until),
                             "notes": notes,
                             "special_terms": special_terms,
