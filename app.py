@@ -4,6 +4,7 @@ import calendar
 import html
 import os
 import re
+import shutil
 from copy import deepcopy
 from io import BytesIO
 from datetime import date, datetime, timezone
@@ -27,6 +28,7 @@ COMPANY_LOGO_FALLBACK = DOWNLOADS_DIR / "WhatsApp Image 2026-07-08 at 15.51.12.j
 SESSION_DATA_CACHE_KEY = "crm_data_cache"
 
 DATA_FILE = Path(__file__).parent / "crm_data.json"
+DATA_BACKUP_DIR = Path(__file__).parent / "data_backups"
 SUPABASE_TABLE = "crm_state"
 SUPABASE_ROW_ID = "default"
 STATUSES = [
@@ -153,6 +155,38 @@ def _save_local_data(data: dict[str, Any]) -> None:
         json.dump(data, f, indent=2)
 
 
+def _write_local_backup_snapshot(data: dict[str, Any], reason: str) -> None:
+    try:
+        DATA_BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        safe_reason = re.sub(r"[^a-zA-Z0-9_-]", "-", reason).strip("-") or "snapshot"
+        backup_file = DATA_BACKUP_DIR / f"crm_data_{stamp}_{safe_reason}.json"
+        backup_file.write_text(json.dumps(data, indent=2), encoding="utf-8")
+
+        # Keep backup directory bounded.
+        backups = sorted(DATA_BACKUP_DIR.glob("crm_data_*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
+        for old_file in backups[40:]:
+            try:
+                old_file.unlink()
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+
+def _backup_current_local_file(reason: str) -> None:
+    try:
+        if not DATA_FILE.exists():
+            return
+        DATA_BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        safe_reason = re.sub(r"[^a-zA-Z0-9_-]", "-", reason).strip("-") or "snapshot"
+        backup_file = DATA_BACKUP_DIR / f"crm_data_{stamp}_{safe_reason}.json"
+        shutil.copy2(DATA_FILE, backup_file)
+    except Exception:
+        pass
+
+
 def _load_supabase_data() -> dict[str, Any] | None:
     client = get_supabase_client()
     if client is None:
@@ -175,13 +209,35 @@ def _load_supabase_data() -> dict[str, Any] | None:
     return None
 
 
-def _save_supabase_data(data: dict[str, Any]) -> bool:
+def _save_supabase_data(data: dict[str, Any], allow_destructive_overwrite: bool = False) -> bool:
     client = get_supabase_client()
     if client is None:
         return False
 
     table_name = _get_secret_or_env("SUPABASE_TABLE", SUPABASE_TABLE) or SUPABASE_TABLE
     row_id = _get_secret_or_env("SUPABASE_ROW_ID", SUPABASE_ROW_ID) or SUPABASE_ROW_ID
+
+    existing_payload = _load_supabase_data()
+    if (not allow_destructive_overwrite) and _has_meaningful_crm_data(existing_payload) and (not _has_meaningful_crm_data(data)):
+        # Refuse to overwrite a non-empty cloud snapshot with an empty payload.
+        return False
+
+    if _has_meaningful_crm_data(data):
+        _write_local_backup_snapshot(data, "pre-cloud-save")
+
+    # Best-effort immutable backup snapshot in the same table using a versioned row id.
+    if _has_meaningful_crm_data(existing_payload):
+        try:
+            backup_id = f"{row_id}__backup__{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+            backup_record = {
+                "id": backup_id,
+                "payload": existing_payload,
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            }
+            client.table(table_name).insert(backup_record).execute()
+        except Exception:
+            pass
+
     record = {
         "id": row_id,
         "payload": data,
@@ -1423,17 +1479,18 @@ def ensure_schema(data: dict[str, Any]) -> bool:
     return changed
 
 
-def save_data(data: dict[str, Any]) -> None:
-    if _save_supabase_data(data):
+def save_data(data: dict[str, Any], allow_destructive_cloud_overwrite: bool = False) -> None:
+    if _save_supabase_data(data, allow_destructive_overwrite=allow_destructive_cloud_overwrite):
         st.session_state[SESSION_DATA_CACHE_KEY] = data
         return
+    _backup_current_local_file("pre-local-save")
     _save_local_data(data)
     st.session_state[SESSION_DATA_CACHE_KEY] = data
 
 
-def save_data_and_refresh(data: dict[str, Any]) -> None:
+def save_data_and_refresh(data: dict[str, Any], allow_destructive_cloud_overwrite: bool = False) -> None:
     st.session_state[SESSION_DATA_CACHE_KEY] = data
-    save_data(data)
+    save_data(data, allow_destructive_cloud_overwrite=allow_destructive_cloud_overwrite)
     st.rerun()
 
 
@@ -6085,7 +6142,16 @@ def main() -> None:
             load_data(force_refresh=True)
             st.rerun()
         if st.button("Reset to Sample Data", width="stretch"):
-            save_data_and_refresh(SAMPLE_DATA)
+            st.session_state["confirm_reset_data"] = True
+
+        if st.session_state.get("confirm_reset_data", False):
+            st.warning("Confirm reset: this will replace your current CRM data with sample data.")
+            rc1, rc2 = st.columns(2)
+            if rc1.button("Confirm Reset", width="stretch"):
+                st.session_state["confirm_reset_data"] = False
+                save_data_and_refresh(deepcopy(SAMPLE_DATA), allow_destructive_cloud_overwrite=True)
+            if rc2.button("Cancel", width="stretch"):
+                st.session_state["confirm_reset_data"] = False
 
     if section == "Dashboard":
         dashboard(data)
