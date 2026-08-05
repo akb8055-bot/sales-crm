@@ -1225,6 +1225,30 @@ def today_iso() -> str:
     return str(date.today())
 
 
+def _has_meaningful_crm_data(data: dict[str, Any] | None) -> bool:
+    if not isinstance(data, dict):
+        return False
+    list_keys = [
+        "customers",
+        "prospects",
+        "quotations",
+        "technical_drawings",
+        "purchase_orders",
+        "order_acknowledgements",
+        "tasks",
+        "activity_log",
+    ]
+    for key in list_keys:
+        value = data.get(key, [])
+        if isinstance(value, list) and len(value) > 0:
+            return True
+    for key in ["prospect_attachments", "customer_attachments"]:
+        value = data.get(key, {})
+        if isinstance(value, dict) and len(value) > 0:
+            return True
+    return False
+
+
 def load_data(force_refresh: bool = False) -> dict[str, Any]:
     if not force_refresh:
         cached = st.session_state.get(SESSION_DATA_CACHE_KEY)
@@ -1232,11 +1256,19 @@ def load_data(force_refresh: bool = False) -> dict[str, Any]:
             return cached
 
     cloud_data = _load_supabase_data()
-    if cloud_data is not None:
-        st.session_state[SESSION_DATA_CACHE_KEY] = cloud_data
-        return cloud_data
-
     local_data = _load_local_data()
+
+    if cloud_data is not None:
+        if _has_meaningful_crm_data(cloud_data):
+            st.session_state[SESSION_DATA_CACHE_KEY] = cloud_data
+            return cloud_data
+        # Recover from local snapshot when cloud row exists but is empty.
+        if _has_meaningful_crm_data(local_data):
+            if _is_supabase_enabled():
+                _save_supabase_data(local_data)
+            st.session_state[SESSION_DATA_CACHE_KEY] = local_data
+            return local_data
+
     if _is_supabase_enabled():
         _save_supabase_data(local_data)
     st.session_state[SESSION_DATA_CACHE_KEY] = local_data
